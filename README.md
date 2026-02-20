@@ -1,3 +1,5 @@
+[![Pipeline Status](https://github.com/sandialabs/mvBayes_matlab/actions/workflows/matlab.yml/badge.svg)](https://github.com/sandialabs/mvBayes_matlab/actions/workflows/matlab.yml)
+
 # mvBayes
 
 An matlab implementation of the multivariate Bayesian regression (mvBayes) framework. Decomposes a multivariate/functional response using a user-specified orthogonal basis decomposition, and then models each basis component independently using an arbitrary user-specified (univariate) Bayesian regression model. Includes prediction and plotting methods.
