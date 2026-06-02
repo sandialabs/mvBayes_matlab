@@ -286,7 +286,8 @@ classdef mvBayes
             end
             labels{p+1} = "Higher Order";
 
-            lty = resize(["-", "--", ":", "-."], p);
+            lty = repmat(["-", "--", ":", "-."], 1, mod(4, p));
+            lty = lty(1:p);
             lty = [lty, "-"];
 
             rgb = zeros(p+1,3);
