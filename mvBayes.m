@@ -278,13 +278,13 @@ classdef mvBayes
             p = size(obj.X,2);
             idxMV = linspace(0, 1, obj.nMV);
 
-            if isnan(labels)
-                labels = strings(1,p+1);
+            if isscalar(labels) && isnan(labels)
+                labels = cell(1,p+1);
                 for i=1:p
-                    labels(i) = sprintf('X%d', i);
+                    labels{i} = sprintf('X%d', i);
                 end
-                labels(p+1) = "Higher Order";
             end
+            labels{p+1} = "Higher Order";
 
             lty = resize(["-", "--", ":", "-."], p);
             lty = [lty, "-"];
@@ -295,7 +295,7 @@ classdef mvBayes
 
             firstOrderRel = obj.firstOrderSobol ./ obj.varTotal;
 
-            figure(105)
+            figure()
             if totalSobol
                 subplot(1,3,1)
                 hold on
@@ -311,7 +311,7 @@ classdef mvBayes
                     else
                         inBetween = [sens(j-1, ord), flip(sens(j,ord))];
                     end
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels(j))
+                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
                 end
                 xlabel("Time")
                 ylabel("Relative First-Order Sobol' Index")
@@ -331,7 +331,7 @@ classdef mvBayes
                         inBetween = [sens_var(j-1, ord), flip(sens_var(j,ord))];
                     end
 
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels(j))
+                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
                 end
                 ylim([0, max(inBetween)+3])
                 xlabel("Time")
@@ -343,7 +343,7 @@ classdef mvBayes
                 subplot(1,3,3)
                 hold on
                 for j=1:p
-                    plot(idxMV, obj.totalOrderSobol(j,:), 'LineStyle', lty(j), 'Color', rgb(j,:), 'LineWidth', 3, 'DisplayName', labels(j));
+                    plot(idxMV, obj.totalOrderSobol(j,:), 'LineStyle', lty(j), 'Color', rgb(j,:), 'LineWidth', 3, 'DisplayName', labels{j});
                 end
                 xlabel("Time")
                 ylabel("Total-Order Sobol' Index")
@@ -366,7 +366,7 @@ classdef mvBayes
                     else
                         inBetween = [sens(j-1, ord), flip(sens(j,ord))];
                     end
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels(j))
+                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
                 end
                 xlabel("Time")
                 ylabel("Relative First-Order Sobol' Index")
@@ -386,7 +386,7 @@ classdef mvBayes
                         inBetween = [sens_var(j-1, ord), flip(sens_var(j,ord))];
                     end
 
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels(j))
+                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
                 end
                 ylim([0, max(inBetween)+3])
                 xlabel("Time")
