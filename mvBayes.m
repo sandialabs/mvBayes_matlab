@@ -226,7 +226,7 @@ classdef mvBayes
                 saltelliSequence = saltelliSequence + xmin;
 
                 % evaluate model at those param values
-                saltelliMC = obj.predict(saltelliSequence, obj.bmList{1}.nstore);
+                saltelliMC = obj.predict(saltelliSequence, length(obj.bmList{1}.samples.s2));
                 saltelliMC = squeeze(saltelliMC);
 
                 % transform the samples
