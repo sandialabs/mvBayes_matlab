@@ -47,8 +47,8 @@ classdef mvBayesMF
             bmList_br = cell(obj.basisInfo.nBasis,1);
             for k = 1:obj.basisInfo.nBasis
                 bmList{k}  = obj.bayesModel(obj.XL, obj.basisInfo.coefs_lf(:,k));
-                lf_at_H   = mean(squeeze(predict(lf_model, obj.XH)),1);
-                residual  = obj.basisInfo.coefs_lf(:,k) - lf_at_H;
+                lf_at_H   = mean(squeeze(predict(bmList{k}, obj.XH)),1);
+                residual  = obj.basisInfo.coefs(:,k) - lf_at_H';
                 bmList_br{k}  = obj.bayesModel(obj.XH, residual);
             end
             obj.bmList = bmList;
@@ -80,7 +80,7 @@ classdef mvBayesMF
 
             center = repmat(obj.basisInfo.Ycenter', 1, size(YstandardPost,2), size(YstandardPost,1));
             center = permute(center, [3 2 1]);
-            Ypost = YstandardPost .* obj.basisInfo.Yscale + center;
+            Ypost = YstandardPost + center;
             clear YstandardPost
 
             if returnMeanOnly
