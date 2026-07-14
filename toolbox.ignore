@@ -33,3 +33,6 @@ resources
 .gitattributes
 .gitignore
 .git
+.github
+.DS_Store
+.buildtool

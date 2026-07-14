@@ -65,26 +65,19 @@ classdef mvBayesMF
             end
 
             postCoefs1 = obj.bmList{1}.predict(Xtest, mcmc_use);
+            postCoefs2 = obj.bmList_br{1}.predict(Xtest, mcmc_use);
             postCoefs = zeros(size(postCoefs1,1), size(postCoefs1,2), obj.basisInfo.nBasis);
-            postCoefs(:, :, 1) = postCoefs1;
-            clear postCoefs1
+            postCoefs(:, :, 1) = postCoefs1 + postCoefs2;
+            clear postCoefs1 postCoefs2
             for k = 2:obj.basisInfo.nBasis
-                postCoefs(:, :, k) = obj.bmList{k}.predict(Xtest, mcmc_use);
+                lf = obj.bmList{k}.predict(Xtest, mcmc_use);
+                br = obj.bmList_br{k}.predict(Xtest, mcmc_use);
+                postCoefs(:, :, k) = lf + br;
             end
 
-            if strcmpi(obj.basisInfo.basisType, "pns")
-                PNS = obj.basisInfo.basisConstruct;
-                N = size(postCoefs,1) * size(postCoefs,2);
-                nBasis = obj.basisInfo.nBasis;
-                inmat = zeros(size(PNS.radii,1), N);
-                inmat(1:nBasis, :) = reshape(postCoefs, N, nBasis)';
-                tmp = fastPNSe2s(inmat, PNS) * PNS.radius;
-                YstandardPost = reshape(tmp, size(postCoefs,1), size(postCoefs,2), size(tmp,2));
-                clear tmp
-            else
-                YstandardPost = pagemtimes(permute(postCoefs, [2 3 1]), obj.basisInfo.basis);
-                YstandardPost = permute(YstandardPost, [3 1 2]);
-            end
+            YstandardPost = pagemtimes(permute(postCoefs, [2 3 1]), obj.basisInfo.basis);
+            YstandardPost = permute(YstandardPost, [3 1 2]);
+
             center = repmat(obj.basisInfo.Ycenter', 1, size(YstandardPost,2), size(YstandardPost,1));
             center = permute(center, [3 2 1]);
             Ypost = YstandardPost .* obj.basisInfo.Yscale + center;
@@ -111,11 +104,7 @@ classdef mvBayesMF
             coefs = obj.basisInfo.coefs;
             truncError = obj.basisInfo.truncError;
 
-            if strcmpi(obj.basisInfo.basisType,"pns")
-                Ycentered = Ytest - mean(Ytest,1);
-            else
-                Ycentered = Ytest - obj.basisInfo.Ycenter;
-            end
+            Ycentered = Ytest - obj.basisInfo.Ycenter;
 
             out_pred = obj.predict(Xtest, length(obj.bmList{1}.samples.s2), true);
 
@@ -143,26 +132,15 @@ classdef mvBayesMF
 
             mseBasis = zeros(obj.basisInfo.nBasis,1);
             varBasis = zeros(obj.basisInfo.nBasis,1);
-            if strcmpi(obj.basisInfo.basisType,"pns")
-                for k = 1:obj.basisInfo.nBasis
-                    mseBasis(k) = mean(RbasisCoefs(:,k).^2);
-                    varBasis(k) = mean(coefs(:,k).^2);
-                end
-            else
-                for k = 1:obj.basisInfo.nBasis
-                    mseBasis(k) = mean(RbasisCoefs(:,k).^2);
-                    varBasis(k) = obj.basisInfo.varExplained(k)*(size(Ytest,1)-1)/(size(Ytest,1));
-                end
+            for k = 1:obj.basisInfo.nBasis
+                mseBasis(k) = mean(RbasisCoefs(:,k).^2);
+                varBasis(k) = obj.basisInfo.varExplained(k)*(size(Ytest,1)-1)/(size(Ytest,1));
             end
 
             subplot(1,2,2)
             r2Basis = 1 - mseBasis ./ varBasis;
             varOverall = sum(obj.basisInfo.varExplained)*(size(Ytest,1)-1)/(size(Ytest,1));
-            if strcmpi(obj.basisInfo.basisType,"pns")
-                r2Overall = 1 - (mseOverall / size(Ytest,2)) / varOverall;
-            else
-                r2Overall = 1 - mseOverall / varOverall;
-            end
+            r2Overall = 1 - mseOverall / varOverall;
 
             scatter(1:obj.basisInfo.nBasis, r2Basis, 50, map(1:obj.basisInfo.nBasis,:), 'filled')
             xlabel("Component")
@@ -180,10 +158,6 @@ classdef mvBayesMF
             end
 
             p = size(obj.X,2);
-
-            if strcmpi(obj.basisInfo.basisType, "pns") && isnan(nMC)
-                nMC = 2^12;
-            end
 
             if strcmpi(class(obj.bmList{1}), "BassModel") && isnan(nMC)
                 mod = BassBasis(obj.X, obj.Y, obj.basisInfo.basis',nan,nan,nan,nan,nan,nan,false);
