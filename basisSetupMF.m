@@ -16,7 +16,7 @@ classdef basisSetupMF
         basis
         basisConstruct
         coefs
-        coefs_lf
+        coefs_br
         tt
     end
 
@@ -36,14 +36,17 @@ classdef basisSetupMF
             obj.Ycenter = 0;
 
             if strcmpi(basisType, "pca")
-                [Phi, obj.Ycenter, explained] = build_hf_basis(obj.Y');                       
+                [Phi, obj.Ycenter, latent] = build_hf_basis(obj.Y');                       
                 [Psi, dopt, ~, ~] = enrich_basis_multifidelity(Phi, obj.Ycenter, obj.Z', mL, .999);
                 obj.basis = Psi';
                 obj.Zcenter = (obj.Ycenter + dopt)';     % Eq. 2.5
                 obj.Ycenter = obj.Ycenter';
 
                 obj.coefs     = (obj.basis * (obj.Y - obj.Zcenter)')';           % m x MH   HF POD coefficients
-                obj.coefs_lf  = (obj.basis * (obj.Z - obj.Zcenter)')';           % m x ML   LF POD coefficients
+                obj.coefs_br  = (obj.basis * (obj.Z - obj.Zcenter)')';           % m x ML   LF POD coefficients
+
+                obj.propVarExplained = cumsum(latent)/sum(latent);
+                obj.varExplained = latent;
             else
                 error('Un-supported basisType')
             end
@@ -51,17 +54,16 @@ classdef basisSetupMF
             
             obj.nBasis = size(obj.basis,1);
 
-            obj.propVarExplained = explained;
             Ytrunc = obj.getYtruc();
             obj.truncError = obj.Y - Ytrunc;
         end
 
-        function Ytrunc = getYtruc(obj, Ytest, coefs, coefs_lf, nBasis)
+        function Ytrunc = getYtruc(obj, Ytest, coefs, coefs_br, nBasis)
             arguments
                 obj
                 Ytest = nan
                 coefs = nan
-                coefs_lf = nan
+                coefs_br = nan
                 nBasis = nan
             end
 
@@ -70,16 +72,16 @@ classdef basisSetupMF
             end
 
             if isnan(coefs)
-                [coefs, coefs_lf] = obj.getCoefs(Ytest);
+                [coefs, coefs_br] = obj.getCoefs(Ytest);
                 YtruncStandard = (coefs(:, 1:nBasis)) * obj.basis(1:nBasis, :);
             else
-                YtruncStandard = (coefs(:, 1:nBasis) + coefs_lf(:, 1:nBasis)) * obj.basis(1:nBasis, :);
+                YtruncStandard = (coefs(:, 1:nBasis) + coefs_br(:, 1:nBasis)) * obj.basis(1:nBasis, :);
             end
 
             Ytrunc = YtruncStandard + obj.Zcenter;
         end
 
-        function [coefs, coefs_lf] = getCoefs(obj, Ytest)
+        function [coefs, coefs_br] = getCoefs(obj, Ytest)
             arguments
                 obj
                 Ytest = nan
@@ -87,7 +89,7 @@ classdef basisSetupMF
 
             if isnan(Ytest)
                 coefs = obj.coefs;
-                coefs_lf = obj.coefs_lf;
+                coefs_br = obj.coefs_br;
             else
                 YtestStandard = (Ytest - obj.Ycenter);
                 coefs = YtestStandard * obj.basis';

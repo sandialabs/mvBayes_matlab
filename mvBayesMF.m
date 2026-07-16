@@ -46,7 +46,7 @@ classdef mvBayesMF
             bmList = cell(obj.basisInfo.nBasis,1);
             bmList_br = cell(obj.basisInfo.nBasis,1);
             for k = 1:obj.basisInfo.nBasis
-                bmList{k}  = obj.bayesModel(obj.XL, obj.basisInfo.coefs_lf(:,k));
+                bmList{k}  = obj.bayesModel(obj.XL, obj.basisInfo.coefs_br(:,k));
                 lf_at_H   = mean(squeeze(predict(bmList{k}, obj.XH)),1);
                 residual  = obj.basisInfo.coefs(:,k) - lf_at_H';
                 bmList_br{k}  = obj.bayesModel(obj.XH, residual);
@@ -78,7 +78,7 @@ classdef mvBayesMF
             YstandardPost = pagemtimes(permute(postCoefs, [2 3 1]), obj.basisInfo.basis);
             YstandardPost = permute(YstandardPost, [3 1 2]);
 
-            center = repmat(obj.basisInfo.Ycenter', 1, size(YstandardPost,2), size(YstandardPost,1));
+            center = repmat(obj.basisInfo.Zcenter', 1, size(YstandardPost,2), size(YstandardPost,1));
             center = permute(center, [3 2 1]);
             Ypost = YstandardPost + center;
             clear YstandardPost
@@ -99,14 +99,17 @@ classdef mvBayesMF
         function plot(obj)
 
             idxMV = 1:obj.basisInfo.nMV;
-            Xtest = obj.X;
+            XtestH = obj.XH;
+            XtestL = obj.XL;
             Ytest = obj.basisInfo.Y;
+            Ztest = obj.basisInfo.Y;
             coefs = obj.basisInfo.coefs;
+            coefs_br = obj.basisInfo.coefs_br;
             truncError = obj.basisInfo.truncError;
 
             Ycentered = Ytest - obj.basisInfo.Ycenter;
 
-            out_pred = obj.predict(Xtest, length(obj.bmList{1}.samples.s2), true);
+            out_pred = obj.predict(XtestH, length(obj.bmList{1}.samples.s2), true);
 
             R = Ytest - squeeze(out_pred.Ypost);
             if size(coefs,2) == 1
@@ -138,13 +141,13 @@ classdef mvBayesMF
             end
 
             subplot(1,2,2)
-            r2Basis = 1 - mseBasis ./ varBasis;
+            r2Basis = compute_r2_field(coefs', squeeze(out_pred.postCoefs)');
             varOverall = sum(obj.basisInfo.varExplained)*(size(Ytest,1)-1)/(size(Ytest,1));
-            r2Overall = 1 - mseOverall / varOverall;
+            r2Overall = compute_r2(Ytest, squeeze(out_pred.Ypost));
 
             scatter(1:obj.basisInfo.nBasis, r2Basis, 50, map(1:obj.basisInfo.nBasis,:), 'filled')
             xlabel("Component")
-            ylabel("R^2")
+            ylabel("MSE")
             title(sprintf('Overall R^2 = %0.3g', r2Overall))
             yline(r2Overall, '--', 'Color',[0.5, 0.5, 0.5])
 
@@ -157,93 +160,70 @@ classdef mvBayesMF
                 nMC = nan
             end
 
-            p = size(obj.X,2);
+            p = size(obj.XH,2);
 
-            if strcmpi(class(obj.bmList{1}), "BassModel") && isnan(nMC)
-                mod = BassBasis(obj.X, obj.Y, obj.basisInfo.basis',nan,nan,nan,nan,nan,nan,false);
-                mod.bm_list = obj.bmList;
-
-                obj_sob = sobolBasis(mod);
-                obj_sob = obj_sob.decomp(1);
-
-                obj.firstOrderSobol = zeros(p, obj.basisInfo.nMV);
-                if totalSobol
-                    obj.totalOrderSobol = zeros(p, obj.basisInfo.nMV);
-                else
-                    obj.totalOrderSobol = nan;
-                end
-                obj.varTotal = zeros(p, obj.basisInfo.nMV);
-                obj.firstOrderSobol = obj_sob.S_var(1:p,:);
-                if totalSobol
-                    obj.totalOrderSobol = obj_sob.T_var;
-                end
-                obj.varTotal = obj_sob.S_var(1,:) ./ obj_sob.S(1,:);
-
-                obj.varTotal = max([obj.varTotal; sum(obj.firstOrderSobol,1)]);
-            else
-                if isnan(nMC)
-                    nMC = 2^12;
-                end
-
-                % Generate random samples of parameters according to Saltelli
-                % (2010) method.
-                qrng = sobolset(2*p);
-                qrng = scramble(qrng,'MatousekAffineOwen');
-                baseSequence = net(qrng,nMC);
-                A = baseSequence(:, 1:p);
-                B = baseSequence(:, (p+1):(2*p));
-                clear baseSequence
-                AB = zeros(p*nMC,p);
-                for j = 1:p
-                    idx = 1:p;
-                    idx(j) = [];
-                    AB(((j-1)*nMC+1):(j*nMC), idx) = A(:,idx);
-                    AB(((j-1)*nMC+1):(j*nMC), j) = B(:,j);
-                end
-                saltelliSequence = [A; B; AB];
-                clear A B AB
-
-                xmin = min(obj.X);
-                xrange = max(obj.X) - xmin;
-                saltelliSequence = saltelliSequence .* xrange;
-                saltelliSequence = saltelliSequence + xmin;
-
-                % evaluate model at those param values
-                saltelliMC = obj.predict(saltelliSequence, length(obj.bmList{1}.samples.s2));
-                saltelliMC = squeeze(saltelliMC);
-
-                % transform the samples
-                meanS = mean(saltelliMC);
-                saltelliMC = saltelliMC - meanS;
-
-                % Estimate Sobol' Indices
-                modA = saltelliMC(1:nMC, :);
-                modB = saltelliMC((nMC+1):(2*nMC), :);
-                modAB = zeros(p, size(modA,1), size(modA,2));
-                for j = 1:p
-                    modAB(j,:,:) = saltelliMC(((2+(j-1))*nMC+1):((2+j)*nMC), :);
-                end
-
-                obj.varTotal = var(saltelliMC, 0, 1);
-                clear saltelliMC
-
-                obj.firstOrderSobol = zeros(p, obj.basisInfo.nMV);
-                if totalSobol
-                    obj.totalOrderSobol = zeros(p, obj.basisInfo.nMV);
-                else
-                    obj.totalOrderSobol = nan;
-                end
-                for j = 1:p
-                    obj.firstOrderSobol(j, :) = mean(modB .* (squeeze(modAB(j,:,:))-modA));
-
-                    if totalSobol
-                        obj.totalOrderSobol(j, :) = 0.5 * mean((modA-squeeze(modAB(j,:,:))).^2);
-                    end
-                end
-
-                obj.varTotal = max([obj.varTotal; sum(obj.firstOrderSobol,1)]);
-
+            if isnan(nMC)
+                nMC = 2^12;
             end
+
+            % Generate random samples of parameters according to Saltelli
+            % (2010) method.
+            qrng = sobolset(2*p);
+            qrng = scramble(qrng,'MatousekAffineOwen');
+            baseSequence = net(qrng,nMC);
+            A = baseSequence(:, 1:p);
+            B = baseSequence(:, (p+1):(2*p));
+            clear baseSequence
+            AB = zeros(p*nMC,p);
+            for j = 1:p
+                idx = 1:p;
+                idx(j) = [];
+                AB(((j-1)*nMC+1):(j*nMC), idx) = A(:,idx);
+                AB(((j-1)*nMC+1):(j*nMC), j) = B(:,j);
+            end
+            saltelliSequence = [A; B; AB];
+            clear A B AB
+
+            xmin = min(obj.XH);
+            xrange = max(obj.XH) - xmin;
+            saltelliSequence = saltelliSequence .* xrange;
+            saltelliSequence = saltelliSequence + xmin;
+
+            % evaluate model at those param values
+            saltelliMC = obj.predict(saltelliSequence, length(obj.bmList{1}.samples.s2));
+            saltelliMC = squeeze(saltelliMC);
+
+            % transform the samples
+            meanS = mean(saltelliMC);
+            saltelliMC = saltelliMC - meanS;
+
+            % Estimate Sobol' Indices
+            modA = saltelliMC(1:nMC, :);
+            modB = saltelliMC((nMC+1):(2*nMC), :);
+            modAB = zeros(p, size(modA,1), size(modA,2));
+            for j = 1:p
+                modAB(j,:,:) = saltelliMC(((2+(j-1))*nMC+1):((2+j)*nMC), :);
+            end
+
+            obj.varTotal = var(saltelliMC, 0, 1);
+            clear saltelliMC
+
+            obj.firstOrderSobol = zeros(p, obj.basisInfo.nMV);
+            if totalSobol
+                obj.totalOrderSobol = zeros(p, obj.basisInfo.nMV);
+            else
+                obj.totalOrderSobol = nan;
+            end
+            for j = 1:p
+                obj.firstOrderSobol(j, :) = mean(modB .* (squeeze(modAB(j,:,:))-modA));
+
+                if totalSobol
+                    obj.totalOrderSobol(j, :) = 0.5 * mean((modA-squeeze(modAB(j,:,:))).^2);
+                end
+            end
+
+            obj.varTotal = max([obj.varTotal; sum(obj.firstOrderSobol,1)]);
+
 
         end
 
@@ -258,7 +238,7 @@ classdef mvBayesMF
                 totalSobol = true;
             end
 
-            p = size(obj.X,2);
+            p = size(obj.XH,2);
             idxMV = linspace(0, 1, obj.nMV);
 
             if isscalar(labels) && isnan(labels)
