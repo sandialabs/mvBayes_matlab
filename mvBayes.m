@@ -94,7 +94,7 @@ classdef mvBayes
             end
         end
 
-        function plot(obj)
+        function fig=plot(obj)
 
             idxMV = 1:obj.basisInfo.nMV;
             Xtest = obj.X;
@@ -117,7 +117,7 @@ classdef mvBayes
                 RbasisCoefs = coefs - squeeze(out_pred.postCoefs);
             end
 
-            figure()
+            fig=figure();
             subplot(1,2,1)
             hold on
             map = tab20;
