@@ -10,6 +10,7 @@ classdef basisSetupMF
         Ycenter
         Zcenter
         propVarExplained
+        propVarExplained_enhanced
         propVarCumSum
         truncError
         nBasis
@@ -37,7 +38,7 @@ classdef basisSetupMF
 
             if strcmpi(basisType, "pca")
                 [Phi, obj.Ycenter, latent] = build_hf_basis(obj.Y');                       
-                [Psi, dopt, ~, ~] = enrich_basis_multifidelity(Phi, obj.Ycenter, obj.Z', mL, .999);
+                [Psi, dopt, ~, energy] = enrich_basis_multifidelity(Phi, obj.Ycenter, obj.Z', mL, .999);
                 obj.basis = Psi';
                 obj.Zcenter = (obj.Ycenter + dopt)';     % Eq. 2.5
                 obj.Ycenter = obj.Ycenter';
@@ -45,8 +46,11 @@ classdef basisSetupMF
                 obj.coefs     = (obj.basis * (obj.Y - obj.Zcenter)')';           % m x MH   HF POD coefficients
                 obj.coefs_br  = (obj.basis * (obj.Z - obj.Zcenter)')';           % m x ML   LF POD coefficients
 
-                obj.propVarExplained = cumsum(latent)/sum(latent);
-                obj.varExplained = latent;
+                base_prop = cumsum(latent)/sum(latent);
+                
+                obj.propVarExplained = base_prop(1:size(Phi,2));
+                obj.varExplained = latent(1:size(Phi,2));
+                obj.propVarExplained_enhanced = energy;
             else
                 error('Un-supported basisType')
             end

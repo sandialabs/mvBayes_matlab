@@ -134,10 +134,8 @@ classdef mvBayesMF
             title(sprintf('Overal MSE = %0.4g', mseOverall/size(Ytest,2)))
 
             mseBasis = zeros(obj.basisInfo.nBasis,1);
-            varBasis = zeros(obj.basisInfo.nBasis,1);
             for k = 1:obj.basisInfo.nBasis
                 mseBasis(k) = mean(RbasisCoefs(:,k).^2);
-                varBasis(k) = obj.basisInfo.varExplained(k)*(size(Ytest,1)-1)/(size(Ytest,1));
             end
 
             subplot(1,2,2)
@@ -145,11 +143,11 @@ classdef mvBayesMF
             varOverall = sum(obj.basisInfo.varExplained)*(size(Ytest,1)-1)/(size(Ytest,1));
             r2Overall = compute_r2(Ytest, squeeze(out_pred.Ypost));
 
-            scatter(1:obj.basisInfo.nBasis, r2Basis, 50, map(1:obj.basisInfo.nBasis,:), 'filled')
+            scatter(1:obj.basisInfo.nBasis, [obj.basisInfo.propVarExplained; obj.basisInfo.propVarExplained_enhanced], 50, map(1:obj.basisInfo.nBasis,:), 'filled')
             xlabel("Component")
-            ylabel("MSE")
+            ylabel("Var Explained")
+            xline((length(obj.basisInfo.propVarExplained) + length(obj.basisInfo.propVarExplained_enhanced))/2, '--','Color',[0.5, 0.5, 0.5])
             title(sprintf('Overall R^2 = %0.3g', r2Overall))
-            yline(r2Overall, '--', 'Color',[0.5, 0.5, 0.5])
 
         end
 
