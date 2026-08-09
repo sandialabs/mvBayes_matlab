@@ -93,7 +93,7 @@ classdef mvBayes
                 end
             end
 
-            obj.nSamples = length(obj.bmList{1}.samples.residSD);
+            obj.nSamples = length(bmList{1}.samples.residSD);
 
         end
 
