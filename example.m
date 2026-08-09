@@ -1,11 +1,11 @@
 %% generate functions
 clc; clear
-addpath(genpath('fdasrvf_MATLAB'))
+addpath(genpath('../fdasrvf_MATLAB'))
 bppr = false; % if false we default to bass
 if bppr
-    addpath('bayesppr_matlab/')
+    addpath('../bayesppr_matlab/')
 else
-    addpath('BASS_matlab/')
+    addpath('../bass_matlab/')
 end
 
 
@@ -71,16 +71,21 @@ plot(tt, vv_obs, 'k', 'LineWidth',2)
 legend('Experiment')
 
 %% Fit Emulators
+
 if bppr
-    emu_ftilde = mvBayes(@bppr, x_train, ftilde_train', 'pca', 4);
+    emu_ftilde = mvBayes(@bppr, x_train, ftilde_train', 'BasisType', 'pca', ...
+        'nBasis', 4, 'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2) );
     emu_ftilde.plot()
 
-    emu_vv = mvBayes(@bppr, x_train, vv_train, 'pns');
+    emu_vv = mvBayes(@bppr, x_train, vv_train', 'BasisType', 'pns', ...
+        'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2) );
     emu_vv.plot()
 else
-    emu_ftilde = mvBayes(@bass, x_train, ftilde_train', 'pca', 4);
+    emu_ftilde = mvBayes(@bass, x_train, ftilde_train', 'BasisType', 'pca', ...
+        'nBasis', 4, 'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2) );
     emu_ftilde.plot()
 
-    emu_vv = mvBayes(@bass, x_train, vv_train', 'pns');
+    emu_vv = mvBayes(@bass, x_train, vv_train', 'BasisType', 'pns', ...
+        'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2) );
     emu_vv.plot()
 end
