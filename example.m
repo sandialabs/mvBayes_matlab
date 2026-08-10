@@ -84,8 +84,13 @@ else
     emu_ftilde = mvBayes(@bass, x_train, ftilde_train', 'BasisType', 'pca', ...
         'nBasis', 4, 'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2) );
     emu_ftilde.plot()
+    emu_ftilde.traceplot()
 
     emu_vv = mvBayes(@bass, x_train, vv_train', 'BasisType', 'pns', ...
         'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2) );
     emu_vv.plot()
 end
+
+%% CV
+
+out = mvCV(@bass, x_train, ftilde_train', 'nRep', 5, 'nBasis', 4, 'idxSamplesArg', 'mcmc_use');

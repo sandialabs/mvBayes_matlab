@@ -143,7 +143,7 @@ classdef mvBayes
                 end
             end
 
-            
+
 
             if strcmpi(idxSamples, 'default')
                 args = {};
@@ -267,6 +267,132 @@ classdef mvBayes
             title(sprintf('Overall R^2 = %0.3g', r2Overall))
             yline(r2Overall, '--', 'Color',[0.5, 0.5, 0.5])
 
+        end
+
+        function traceplot(obj, modelParams, labels, plotTitle, file)
+            %TRACEPLOT Trace plots of model parameters
+            %
+            %   obj.traceplot(modelParams, labels, plotTitle, file, ...)
+            %
+            %   modelParams : char/string or cell array of strings specifying names of
+            %                 model parameters to plot. These should be fields
+            %                 (struct) or properties (object) of `samples` on each
+            %                 element of obj.bmList. If [] or omitted, selects
+            %                 "plottable" fields/properties of samples (scalars and
+            %                 vectors), including residSD.
+            %   labels      : char/string or cell array of strings labeling each
+            %                 model parameter. Default is to use modelParams.
+            %   plotTitle   : title for the whole figure. Default is no title.
+            %   file        : file path to save the plot. Default ([]) is not to
+            %                 save, but to just leave the figure open (in place of
+            %                 plt.show()).
+            %
+            %   Returns nothing.
+
+            arguments
+                obj
+                modelParams = []
+                labels = []
+                plotTitle = []
+                file = []
+            end
+
+            bmList = obj.bmList;      % cell array of bayesModel-like objects
+            nBasis = obj.basisInfo.nBasis;
+
+            % ---- default modelParams: auto-detect "plottable" attributes ----
+            if isempty(modelParams)
+                samp1 = bmList{1}.samples;
+
+                if isstruct(samp1)
+                    allAttrs = fieldnames(samp1);
+                else
+                    allAttrs = properties(samp1);
+                end
+
+                modelParams = {};
+                for i = 1:numel(allAttrs)
+                    attr = allAttrs{i};
+                    val = samp1.(attr);
+                    if isvector(val)
+                        modelParams{end+1} = attr; %#ok<AGROW>
+                    end
+                end
+            elseif ischar(modelParams) || isstring(modelParams)
+                modelParams = {char(modelParams)};
+            end
+
+            % ---- default labels ----
+            if ischar(labels) || isstring(labels)
+                labels = {char(labels)};
+            elseif isempty(labels)
+                labels = modelParams;
+            end
+
+            nParams = numel(modelParams);
+            if nParams > 8
+                warning('Currently, must have length(modelParams) <= 8. Plotting the first 8.');
+                modelParams = modelParams(1:8);
+                labels = labels(1:8);
+                nParams = 8;
+            end
+
+            nrow = ceil(nParams / 2);
+            if nParams == 1
+                ncol = 1;
+            else
+                ncol = 2;
+            end
+
+            fig = figure('Position', [100 100 800 600]);
+            cmap = tab20;   % qualitative 20-color palette (analog of "tab20")
+
+            for j = 1:nParams
+                subplot(nrow, ncol, j);
+                hold on
+                for k = 1:nBasis
+                    s = bmList{k}.samples;
+
+                    if isstruct(s) && isfield(s, modelParams{j})
+                        param = s.(modelParams{j});
+                    elseif isobject(s) && isprop(s, modelParams{j})
+                        param = s.(modelParams{j});
+                    else
+                        error('No attribute named %s', modelParams{j});
+                    end
+
+                    colorIdx = mod(k - 1, 20) + 1;
+                    plot(param, 'Color', cmap(colorIdx, :));
+                end
+                hold off
+                ylabel(labels{j});
+                xlabel('MCMC iteration');
+            end
+
+            if ~isempty(plotTitle)
+                sgtitle(plotTitle);
+            end
+
+            if isempty(file)
+                % leave figure visible (analog of plt.show())
+            else
+                exportgraphics(fig, file);
+            end
+        end
+
+        % ------------------------------------------------------------------
+        function tf = isModelParam(val)
+            % Mirrors the Python isModelParam helper: returns true for scalars and
+            % vectors (excluding strings/chars, empties, and function handles).
+            if isempty(val) || isa(val, 'function_handle') || ischar(val) || isstring(val)
+                tf = false;
+                return
+            end
+            try
+                tf = isnumeric(val) && (isscalar(val) || isvector(val));
+            catch
+                tf = false;
+            end
         end
 
         function obj = mvSobol(obj, totalSobol, nMC)
