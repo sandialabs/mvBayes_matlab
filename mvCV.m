@@ -24,6 +24,7 @@ function out = mvCV(bayesModel, X, Y, varargin)
 %     'coverageTarget'  Level of coverage desired (default 0.95).
 %     'idxSamples'      Which posterior samples to use (default "default").
 %     'uqTruncMethod'   "gaussian" or "empirical" (default "gaussian").
+%     'multifidelity'  true or false to run MF (default false)
 %
 %   Any additional name-value pairs are forwarded to mvBayes (including
 %   arguments to bayesModel).
@@ -40,7 +41,8 @@ opts = struct( ...
     'seed',           [], ...
     'coverageTarget', 0.95, ...
     'idxSamples',     "default", ...
-    'uqTruncMethod',  "gaussian");
+    'uqTruncMethod',  "gaussian", ...
+    'multifidelity', false);
 
 knownNames = fieldnames(opts);
 extraArgs  = {};
@@ -69,6 +71,7 @@ seed           = opts.seed;
 coverageTarget = opts.coverageTarget;
 idxSamples     = opts.idxSamples;
 uqTruncMethod  = lower(string(opts.uqTruncMethod));
+MF = opts.multifidelity;
 
 % -------------------------------------------------------------------- Setup
 [n, ~] = size(X);
@@ -129,7 +132,11 @@ for r = 1:nRep
 
     % Fit model
     startFit = tic;
-    fit = mvBayes(bayesModel, Xtrain, Ytrain, extraArgs{:});
+    if MF
+        fit = mvBayesMF(bayesModel, Xtrain, Ytrain, extraArgs{:});
+    else
+        fit = mvBayes(bayesModel, Xtrain, Ytrain, extraArgs{:});
+    end
     fitTime(r) = toc(startFit);
 
     % Predict: preds is nSamples x nTest x q
