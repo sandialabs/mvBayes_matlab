@@ -271,7 +271,7 @@ classdef mvBayesMF
             scatter(1:obj.basisInfo.nBasis, [obj.basisInfo.propVarExplained; obj.basisInfo.propVarExplained_enhanced], 50, map(1:obj.basisInfo.nBasis,:), 'filled')
             xlabel("Component")
             ylabel("Var Explained")
-            xline((length(obj.basisInfo.propVarExplained) + length(obj.basisInfo.propVarExplained_enhanced))/2, '--','Color',[0.5, 0.5, 0.5])
+            xline(floor((length(obj.basisInfo.propVarExplained) + length(obj.basisInfo.propVarExplained_enhanced))/2)-1, '--','Color',[0.5, 0.5, 0.5])
             title(sprintf('Overall R^2 = %0.3g', r2Overall))
 
         end
