@@ -143,8 +143,6 @@ classdef mvBayes
                 end
             end
 
-
-
             if strcmpi(idxSamples, 'default')
                 args = {};
             else

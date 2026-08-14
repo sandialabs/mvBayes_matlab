@@ -13,18 +13,26 @@ classdef mvBayesMF
         firstOrderSobol
         totalOrderSobol
         varTotal
+        residSDExtract
+        idxSamplesArg
+        samplesExtract
+        nSamples
+        mL
     end
 
     methods
-        function obj = mvBayesMF(bayesModel, XH, XL, Y, Z, basisType, mL)
+        function obj = mvBayesMF(bayesModel, XH, XL, Y, Z, options)
             arguments
                 bayesModel
                 XH
                 XL
                 Y
                 Z
-                basisType = "pca"
-                mL = 20
+                options.basisType = "pca"
+                options.mL = 20
+                options.residSDExtract = []
+                options.samplesExtract = []
+                options.idxSamplesArg = "idxSamples"
             end
 
             obj.XH = XH;
@@ -33,8 +41,12 @@ classdef mvBayesMF
             obj.Z = Z;
             obj.nMV = size(Y,2);
             obj.bayesModel = bayesModel;
+            obj.residSDExtract = options.residSDExtract;
+            obj.idxSamplesArg = options.idxSamplesArg;
+            obj.samplesExtract = options.samplesExtract;
+            obj.mL = options.mL;
 
-            obj.basisInfo = basisSetupMF(Y, Z, basisType, mL);
+            obj.basisInfo = basisSetupMF(Y, Z, options.basisType, options.mL);
 
             obj = obj.fit();
 
@@ -53,25 +65,126 @@ classdef mvBayesMF
             end
             obj.bmList = bmList;
             obj.bmList_br = bmList_br;
+
+            % Get Samples
+            for k = 1:obj.basisInfo.nBasis
+                if isempty(obj.samplesExtract)
+                    if isobject(bmList{k}) && ~isprop(bmList{k}, 'samples')
+                        if k == 1
+                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList{1}'")
+                        end
+                        bmList{k}.samples = bayesModelSamples();
+                        continue
+                    end
+
+                    if isstruct(bmList{k}) && ~isfield(bmList{k}, 'samples')
+                        if k == 1
+                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList{1}'")
+                        end
+                        bmList{k}.samples = bayesModelSamples();
+                        continue
+                    end
+
+                    if isobject(bmList_br{k}) && ~isprop(bmList_br{k}, 'samples')
+                        if k == 1
+                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList_br{1}'")
+                        end
+                        bmList_br{k}.samples = bayesModelSamples();
+                        continue
+                    end
+
+                    if isstruct(bmList_br{k}) && ~isfield(bmList_br{k}, 'samples')
+                        if k == 1
+                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList_br{1}'")
+                        end
+                        bmList_br{k}.samples = bayesModelSamples();
+                        continue
+                    end
+                else
+                    bmList{k}.samples = obj.samplesExtract(bmList{k});
+                    bmList_br{k}.samples = obj.samplesExtract(bmList_br{k});
+                end
+
+            end
+
+            % Get Residual SD
+            if isempty(obj.residSDExtract)
+                fprintf("Approximating 'residSD', since 'residSDExtract' is NaN\n")
+                out = obj.predict(obj.X, 'returnPostCoefs', true);
+                for k = 1:obj.basisInfo.nBasis
+                    resid = obj.basisInfo.coefs(:,k)' - out.postCoefs(:, :, k);
+                    bmList{k}.samples.residSD = std(resid,0, 2);
+                end
+            else
+                for k = 1:obj.basisInfo.nBasis
+                    bmList{k}.samples.residSD = obj.residSDExtract(bmList{k});
+                end
+            end
+
+            obj.nSamples = length(bmList{1}.samples.residSD);
         end
 
-        function out = predict(obj, Xtest, mcmc_use, returnPostCoefs, returnMeanOnly)
+        function out = predict(obj, Xtest, options)
             arguments
                 obj
                 Xtest
-                mcmc_use = nan
-                returnPostCoefs = false
-                returnMeanOnly = false
+                options.idxSamples = "default"
+                options.returnPostCoefs = false
+                options.returnMeanOnly = false
+                options.addResidError = false
+                options.idxSamplesArg = []
             end
 
-            postCoefs1 = obj.bmList{1}.predict(Xtest, mcmc_use);
-            postCoefs2 = obj.bmList_br{1}.predict(Xtest, mcmc_use);
+            idxSamples = options.idxSamples;
+            returnPostCoefs = options.returnPostCoefs;
+            returnMeanOnly = options.returnMeanOnly;
+            idxSamplesArg = options.idxSamplesArg;
+            addResidError = options.addResidError;
+
+            if isempty(idxSamplesArg)
+                idxSamplesArg = obj.idxSamplesArg;
+            end
+
+            if (ischar(idxSamples) || isstring(idxSamples)) && strcmp(idxSamples, "default")
+                % nothing to do
+
+            elseif ~ismember(idxSamplesArg, methodInputNames(obj.bmList{1}, 'predict'))
+                fprintf(['''%s'' is not an argument of the bayesModel predict ' ...
+                    'function...setting idxSamples=''default''\n'], idxSamplesArg);
+                idxSamples = "default";
+
+            else
+                if (ischar(idxSamples) || isstring(idxSamples)) && strcmp(idxSamples, "final")
+                    idxSamples = obj.nSamples;          % see note 3
+                elseif isnumeric(idxSamples) || islogical(idxSamples)
+                    idxSamples = double(idxSamples(:)).';   % scalar or vector, both fine
+                elseif iscell(idxSamples)
+                    idxSamples = cell2mat(cellfun(@double, idxSamples(:).', 'UniformOutput', false));
+                else
+                    try
+                        idxSamples = double(idxSamples);
+                    catch
+                        error('MyClass:badIdxSamples', ...
+                            ['''idxSamples'' must be ''default'', ''final'', ' ...
+                            'numeric, or coercible to numeric.']);
+                    end
+                end
+            end
+
+            if strcmpi(idxSamples, 'default')
+                args = {};
+            else
+                args = {idxSamplesArg, idxSamples};
+            end
+
+            postCoefs1 = obj.bmList{1}.predict(Xtest, args{:});
+            postCoefs2 = obj.bmList_br{1}.predict(Xtest, args{:});
             postCoefs = zeros(size(postCoefs1,1), size(postCoefs1,2), obj.basisInfo.nBasis);
             postCoefs(:, :, 1) = postCoefs1 + postCoefs2;
             clear postCoefs1 postCoefs2
             for k = 2:obj.basisInfo.nBasis
-                lf = obj.bmList{k}.predict(Xtest, mcmc_use);
-                br = obj.bmList_br{k}.predict(Xtest, mcmc_use);
+                lf = obj.bmList{k}.predict(Xtest, args{:});
+                br = obj.bmList_br{k}.predict(Xtest, args{:});
                 postCoefs(:, :, k) = lf + br;
             end
 
@@ -82,6 +195,16 @@ classdef mvBayesMF
             center = permute(center, [3 2 1]);
             Ypost = YstandardPost + center;
             clear YstandardPost
+
+            if addResidError
+                for k = 1:obj.basisInfo.nBasis
+                    mu = zeros(length(obj.bmList{k}.samples.residSD), 1);
+                    n = size(postCoefs,2);
+                    residError = mvnrnd(mu, obj.bmList{k}.samples.residSD, n);
+                    residError_br = mvnrnd(mu, obj.bmList_br{k}.samples.residSD, n);
+                    postCoefs(:, :, k) = postCoefs(:, :, k) + residError + residError_br;
+                end
+            end
 
             if returnMeanOnly
                 Ypost = squeeze(mean(Ypost, 1));
@@ -109,7 +232,9 @@ classdef mvBayesMF
 
             Ycentered = Ytest - obj.basisInfo.Ycenter;
 
-            out_pred = obj.predict(XtestH, length(obj.bmList{1}.samples.s2), true);
+            args = {'idxSamples', 'final', 'returnPostCoefs', true, 'idxSamplesArg', obj.idxSamplesArg};
+
+            out_pred = obj.predict(XtestH, args{:});
 
             R = Ytest - squeeze(out_pred.Ypost);
             if size(coefs,2) == 1
@@ -360,4 +485,19 @@ classdef mvBayesMF
 
         end
     end
+end
+
+function names = methodInputNames(objIn, methodName)
+mc = metaclass(objIn);
+m  = mc.MethodList(strcmp({mc.MethodList.Name}, methodName));
+if isempty(m)
+    names = {};
+else
+    inputs = m.Signature.Inputs;
+    names = cell(1,length(inputs));
+    for i = 1:length(inputs)
+        tmp = inputs(i).Identifier.Name;
+        names{i} = tmp;
+    end
+end
 end
