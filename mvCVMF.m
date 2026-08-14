@@ -1,4 +1,4 @@
-function out = mvCV(bayesModel, X, Y, varargin)
+function out = mvCVMF(bayesModel, XH, XL, Y, Z, varargin)
 %MVCV Cross-Validation (CV) of a Multivariate Bayesian Regression Model
 %
 %   out = mvCV(bayesModel, X, Y, 'Name', Value, ...)
@@ -7,10 +7,16 @@ function out = mvCV(bayesModel, X, Y, varargin)
 %     bayesModel     Handle to a Bayesian regression model-fitting function whose
 %                    first argument is an nxp input matrix and whose second
 %                    argument is an n-vector of numeric responses.
-%     X              nxp matrix of predictors, where n is the total number of
+%     XHF            nxp matrix of predictors, where n is the total number of
+%                    examples (training + test) and p is the number of
+%                    inputs. High Fidelity 
+%     XLF            nxp matrix of predictors, where n is the total number of
 %                    examples (training + test) and p is the number of inputs.
+%                    Low Fidelity
 %     Y              nxq response matrix, where q is the number of
-%                    multivariate/functional responses.
+%                    multivariate/functional responses. High Fidelity
+%     Z              nxq response matrix, where q is the number of
+%                    multivariate/functional responses. Low Fidelity
 %
 %   Name-value options:
 %     'nTrain'          Number of examples in the training set. If empty,
@@ -130,7 +136,7 @@ for r = 1:nRep
 
     % Fit model
     startFit = tic;
-    fit = mvBayes(bayesModel, Xtrain, Ytrain, extraArgs{:});
+    fit = mvBayesMF(bayesModel, XHFtrain, XLFtrain, Ytrain, Ztrain, extraArgs{:});
     fitTime(r) = toc(startFit);
 
     % Predict: preds is nSamples x nTest x q
