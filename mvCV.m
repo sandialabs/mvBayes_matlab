@@ -69,7 +69,6 @@ seed           = opts.seed;
 coverageTarget = opts.coverageTarget;
 idxSamples     = opts.idxSamples;
 uqTruncMethod  = lower(string(opts.uqTruncMethod));
-MF = opts.multifidelity;
 
 % -------------------------------------------------------------------- Setup
 [n, ~] = size(X);

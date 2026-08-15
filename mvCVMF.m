@@ -1,7 +1,8 @@
 function out = mvCVMF(bayesModel, XH, XL, Y, Z, varargin)
-%MVCV Cross-Validation (CV) of a Multivariate Bayesian Regression Model
+%MVCVMF Cross-Validation (CV) of a Multivariate Bayesian Regression Model
+%        Multi-Fidelity
 %
-%   out = mvCV(bayesModel, X, Y, 'Name', Value, ...)
+%   out = mvCVMF(bayesModel, XH, XL, Y, Z, 'Name', Value, ...)
 %
 %   Inputs:
 %     bayesModel     Handle to a Bayesian regression model-fitting function whose
@@ -54,10 +55,10 @@ iArg = 1;
 while iArg <= numel(varargin)
     name = varargin{iArg};
     if ~(ischar(name) || isstring(name))
-        error('mvCV:badOption', 'Optional arguments must be name-value pairs.');
+        error('mvCVMF:badOption', 'Optional arguments must be name-value pairs.');
     end
     if iArg == numel(varargin)
-        error('mvCV:badOption', 'Option "%s" is missing a value.', char(name));
+        error('mvCVMF:badOption', 'Option "%s" is missing a value.', char(name));
     end
     idxMatch = find(strcmpi(char(name), knownNames), 1);
     if isempty(idxMatch)
@@ -75,10 +76,9 @@ seed           = opts.seed;
 coverageTarget = opts.coverageTarget;
 idxSamples     = opts.idxSamples;
 uqTruncMethod  = lower(string(opts.uqTruncMethod));
-MF = opts.multifidelity;
 
 % -------------------------------------------------------------------- Setup
-[n, ~] = size(X);
+[n, ~] = size(XH);
 q      = size(Y, 2);
 alpha  = 1 - coverageTarget;
 
@@ -87,13 +87,13 @@ if isempty(nTest)
         nTest  = floor(n / 2);   % half in test set
         nTrain = n - nTest;
     elseif nTrain >= n
-        error('mvCV:badSplit', 'Must have nTrain < size(X, 1)');
+        error('mvCV:badSplit', 'Must have nTrain < size(XH, 1)');
     else
         nTest = n - nTrain;
     end
 else
     if nTest >= n
-        error('mvCV:badSplit', 'Must have nTest < size(X, 1)');
+        error('mvCV:badSplit', 'Must have nTest < size(XH, 1)');
     elseif isempty(nTrain)
         nTrain = n - nTest;
     elseif nTrain + nTest > n
@@ -129,14 +129,14 @@ predictTime   = zeros(nRep, 1);
 
 for r = 1:nRep
     % Set up train/test split
-    Xtrain = X(idxTrain{r}, :);
+    Xtrain = XH(idxTrain{r}, :);
     Ytrain = Y(idxTrain{r}, :);
-    Xtest  = X(idxTest{r},  :);
+    Xtest  = XH(idxTest{r},  :);
     Ytest  = Y(idxTest{r},  :);
 
     % Fit model
     startFit = tic;
-    fit = mvBayesMF(bayesModel, XHFtrain, XLFtrain, Ytrain, Ztrain, extraArgs{:});
+    fit = mvBayesMF(bayesModel, Xtrain, XL, Ytrain, Z, extraArgs{:});
     fitTime(r) = toc(startFit);
 
     % Predict: preds is nSamples x nTest x q

@@ -110,18 +110,18 @@ classdef mvBayesMF
             % Get Residual SD
             if isempty(obj.residSDExtract)
                 fprintf("Approximating 'residSD', since 'residSDExtract' is NaN\n")
-                out = obj.predict(obj.X, 'returnPostCoefs', true);
+                out = obj.predict(obj.XH, 'returnPostCoefs', true);
                 for k = 1:obj.basisInfo.nBasis
                     resid = obj.basisInfo.coefs(:,k)' - out.postCoefs(:, :, k);
-                    bmList{k}.samples.residSD = std(resid,0, 2);
+                    obj.bmList{k}.samples.residSD = std(resid,0, 2);
                 end
             else
                 for k = 1:obj.basisInfo.nBasis
-                    bmList{k}.samples.residSD = obj.residSDExtract(bmList{k});
+                    obj.bmList{k}.samples.residSD = obj.residSDExtract(bmList{k});
                 end
             end
 
-            obj.nSamples = length(bmList{1}.samples.residSD);
+            obj.nSamples = length(obj.bmList{1}.samples.residSD);
         end
 
         function out = predict(obj, Xtest, options)
