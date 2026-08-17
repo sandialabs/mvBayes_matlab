@@ -123,6 +123,7 @@ rmse          = zeros(nRep, 1);
 rSquared      = zeros(nRep, 1);
 coverage      = zeros(nRep, 1);
 intervalWidth = zeros(nRep, 1);
+crps          = zeros(nRep, 1);
 intervalScore = zeros(nRep, 1);
 fitTime       = zeros(nRep, 1);
 predictTime   = zeros(nRep, 1);
@@ -196,6 +197,7 @@ for r = 1:nRep
     distRatio        = distTest ./ distBound;
     coverage(r)      = mean(distRatio <= 1);
     intervalWidth(r) = exp(mean(log(distBound)));
+    crps(r)          = mean(energy_score(Yhat, preds));
     intervalScore(r) = intervalWidth(r) * ...
         exp(mean(log(distRatio) .* (distRatio > 1)) / alpha);
 end
@@ -206,6 +208,7 @@ out.rmse           = rmse;
 out.rSquared       = rSquared;
 out.coverageTarget = coverageTarget;
 out.coverage       = coverage;
+out.crps           = crps;
 out.intervalWidth  = intervalWidth;
 out.intervalScore  = intervalScore;
 out.fitTime        = fitTime;
