@@ -93,4 +93,4 @@ end
 
 %% CV
 
-out = mvCV(@bppr, x_train, ftilde_train', 'nRep', 5, 'nBasis', 4, 'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2));
+out = mvCV(@bass, x_train, ftilde_train', 'nRep', 5, 'nBasis', 4, 'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2));

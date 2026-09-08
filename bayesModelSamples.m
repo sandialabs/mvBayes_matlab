@@ -30,6 +30,7 @@ classdef bayesModelSamples < dynamicprops
             if isstruct(s)
                 names = fieldnames(s);
                 for i = 1:numel(names)
+                    obj.addprop(names{i});
                     obj.(names{i}) = s.(names{i});
                 end
             elseif isobject(s)
