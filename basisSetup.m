@@ -10,6 +10,7 @@ classdef basisSetup
         scale
         Ycenter
         Yscale
+        basisMean       % mean removed by the basis construction itself (PCA)
         propVarExplained
         propVarCumSum
         truncError
@@ -21,7 +22,7 @@ classdef basisSetup
     end
 
     methods
-        function obj = basisSetup(Y, basisType, nBasis, propVarExplained, center, scale)
+        function obj = basisSetup(Y, basisType, nBasis, propVarExplained, center, scale, thresh)
             arguments
                 Y {mustBeNumeric}
                 basisType = "pca"
@@ -29,6 +30,7 @@ classdef basisSetup
                 propVarExplained = 0.99
                 center = true
                 scale = false
+                thresh = 1e-15
             end
 
             obj.Y = Y;
@@ -36,72 +38,101 @@ classdef basisSetup
             obj.basisType = basisType;
             obj.Ycenter = 0;
             obj.Yscale = 1;
+            obj.basisMean = 0;
             if strcmpi(basisType, "pns")
                 center = false;
                 scale = false;
             end
             if center
-                obj.Ycenter = mean(Y);
+                obj.Ycenter = mean(Y, 1);
             end
             if scale
-                obj.Yscale = std(Y);
+                % Normalize by N (not N-1) to match numpy's np.std default.
+                obj.Yscale = std(Y, 1, 1);
                 obj.Yscale(obj.Yscale==0) = 1;
             end
-            Ystandard = (Y-obj.Ycenter)./obj.Yscale;
+            obj.center = center;
+            obj.scale = scale;
+            Ystandard = (Y - obj.Ycenter) ./ obj.Yscale;
 
             if strcmpi(basisType, "pca")
-                [V, d] = eig(cov(Ystandard), 'vector');
-                [obj.varExplained, ind] = sort(d, 'descend');
-                basis = V(:, ind)';
-                coefs = Ystandard * basis';
+                % Singular value decomposition, matching sklearn.decomposition.PCA:
+                % the data are centered internally, explained variance is the
+                % unbiased eigenvalue, and components are sign-flipped by
+                % sklearn's svd_flip with u_based_decision = false, i.e. the
+                % largest-magnitude loading of each component is made positive.
+                % (Signs are a convention only; reconstructions are unaffected.)
+                n = size(Ystandard, 1);
+                obj.basisMean = mean(Ystandard, 1);
+                Ycentered = Ystandard - obj.basisMean;
+
+                [U, S, V] = svd(Ycentered, 'econ');
+                sv = diag(S);
+                basis = V';                           % components, one per row
+
+                [~, jMax] = max(abs(basis), [], 2);
+                signs = sign(basis(sub2ind(size(basis), (1:size(basis,1))', jMax)));
+                signs(signs == 0) = 1;
+                basis = basis .* signs;
+                U = U .* signs.';
+
+                obj.varExplained = (sv.^2) / (n - 1);
+                coefs = U .* sv.';                    % == Ycentered * basis'
             elseif strcmpi(basisType, "pns")
                 [n, d] = size(Y);
                 obj.tt = linspace(0, 1, d);
 
-                Y = Y';
-                radius = mean(sqrt(sum(Y.^2)));
-                pnsdat = Y./repmat(sqrt(sum(Y.^2)),d,1);
+                Yt = Y';
+                radius = mean(sqrt(sum(Yt.^2)));
+                pnsdat = Yt ./ repmat(sqrt(sum(Yt.^2)), d, 1);
 
-                [resmat, PNS] = fastpns(pnsdat, 1);
+                % n_pc = 1 selects the "Approx" (99% variance) rule in fastpns.
+                [resmat, PNS] = fastpns(pnsdat, 1, 1, 0.05, 100, thresh);
                 coefs = resmat';
-                basis = zeros(size(resmat,1), size(Y,1));
+                basis = zeros(size(resmat,1), size(Yt,1));
                 PNS.radius = radius;
                 obj.basisConstruct = PNS;
 
                 obj.varExplained = sum(abs(resmat.^2), 2) / n;
             else
-                error('Un-supported basisType')
+                error('basisSetup:badBasisType', 'Un-supported basisType')
             end
 
             obj.propVarCumSum = cumsum(obj.varExplained) / sum(obj.varExplained);
             if isnan(nBasis)
-                obj.nBasis = find(obj.propVarCumSum <= propVarExplained, 1, 'last');
-                if isempty(obj.nBasis)
-                    obj.nBasis = 1;
+                % Smallest number of components explaining at least
+                % propVarExplained of the variance.
+                nBasis = find(obj.propVarCumSum > propVarExplained, 1, 'first');
+                if isempty(nBasis)
+                    nBasis = numel(obj.propVarCumSum);
                 end
-            else
-                obj.nBasis = nBasis;
             end
+            obj.nBasis = min(nBasis, size(basis,1));
 
-            obj.propVarExplained = obj.propVarCumSum(1:obj.nBasis);
+            obj.propVarExplained = obj.propVarCumSum(obj.nBasis);
             obj.basis = basis(1:obj.nBasis,:);
             obj.coefs = coefs(:, 1:obj.nBasis);
-            Ytrunc = obj.getYtruc();
+            Ytrunc = obj.getYtrunc();
             obj.truncError = obj.Y - Ytrunc;
         end
 
-        function Ytrunc = getYtruc(obj, Ytest, coefs, nBasis)
+        function Ytrunc = getYtrunc(obj, Ytest, coefs, nBasis)
+            %GETYTRUNC Reconstruction of Ytest from the first nBasis components.
+            %
+            %   If Ytest is supplied, its coefficients are computed; if coefs is
+            %   supplied, it is used directly; if neither is supplied, obj.coefs
+            %   is used. Pass [] to leave an argument unset.
             arguments
                 obj
-                Ytest = nan
-                coefs = nan
-                nBasis = nan
+                Ytest = []
+                coefs = []
+                nBasis = []
             end
 
-            if isnan(coefs)
+            if isempty(coefs)
                 coefs = obj.getCoefs(Ytest);
             end
-            if isnan(nBasis) || nBasis > obj.nBasis
+            if isempty(nBasis) || nBasis > obj.nBasis
                 nBasis = obj.nBasis;
             end
             if strcmpi(obj.basisType, "pns")
@@ -114,32 +145,45 @@ classdef basisSetup
                 YtruncStandard = coefs(:, 1:nBasis) * obj.basis(1:nBasis, :);
             end
 
-            Ytrunc = YtruncStandard * obj.Yscale + obj.Ycenter;
+            Ytrunc = YtruncStandard .* obj.Yscale + obj.Ycenter;
         end
 
         function coefs = getCoefs(obj, Ytest)
+            %GETCOEFS Project Ytest onto the basis. Pass [] to return obj.coefs.
             arguments
                 obj
-                Ytest = nan
+                Ytest = []
             end
 
-            if isnan(Ytest)
+            if isempty(Ytest)
                 coefs = obj.coefs;
             else
-                YtestStandard = (Ytest - obj.Ycenter) / obj.Yscale;
+                YtestStandard = (Ytest - obj.Ycenter) ./ obj.Yscale;
                 if strcmpi(obj.basisType,"pns")
                     [n, d] = size(Ytest);
-                    tt = linspace(0, 1, d);
+                    ttLocal = linspace(0, 1, d);
                     psi = zeros(d,n);
-                    binsize = mean(diff(tt));
+                    binsize = mean(diff(ttLocal));
                     for k = 1:n
                         psi(:, k) = sqrt(gradient(Ytest(k, :), binsize));
                     end
                     pnsdat = psi./repmat(sqrt(sum(psi.^2)),d,1);
                     coefs = PNSs2e(pnsdat, obj.basisConstruct);
+                    coefs = coefs(:, 1:obj.nBasis);
                 else
-                    coefs = YtestStandard * obj.basis';
+                    coefs = (YtestStandard - obj.basisMean) * obj.basis';
                 end
+            end
+        end
+
+        function Ytest = preprocessY(obj, Ytest)
+            %PREPROCESSY Hook for subclasses. Returns Ytest, or obj.Y if unset.
+            arguments
+                obj
+                Ytest = []
+            end
+            if isempty(Ytest)
+                Ytest = obj.Y;
             end
         end
     end

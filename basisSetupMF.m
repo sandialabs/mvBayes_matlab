@@ -58,11 +58,11 @@ classdef basisSetupMF
             
             obj.nBasis = size(obj.basis,1);
 
-            Ytrunc = obj.getYtruc();
+            Ytrunc = obj.getYtrunc();
             obj.truncError = obj.Y - Ytrunc;
         end
 
-        function Ytrunc = getYtruc(obj, Ytest, coefs, coefs_br, nBasis)
+        function Ytrunc = getYtrunc(obj, Ytest, coefs, coefs_br, nBasis)
             arguments
                 obj
                 Ytest = nan

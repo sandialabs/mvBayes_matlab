@@ -30,6 +30,7 @@ classdef mvBayes
                 options.residSDExtract = []
                 options.samplesExtract = []
                 options.idxSamplesArg = "idxSamples"
+                options.thresh = 1e-15
             end
 
             obj.X = X;
@@ -40,7 +41,8 @@ classdef mvBayes
             obj.idxSamplesArg = options.idxSamplesArg;
             obj.samplesExtract = options.samplesExtract;
 
-            obj.basisInfo = basisSetup(Y, options.basisType, options.nBasis, options.propVarExplained, options.center, options.scale);
+            obj.basisInfo = basisSetup(Y, options.basisType, options.nBasis, ...
+                options.propVarExplained, options.center, options.scale, options.thresh);
 
             obj = obj.fit();
 
@@ -53,43 +55,44 @@ classdef mvBayes
             for k = 1:obj.basisInfo.nBasis
                 bmList{k} = obj.bayesModel(obj.X, obj.basisInfo.coefs(:,k));
             end
-            obj.bmList = bmList;
 
-            % Get Samples
+            % Get Samples. This must happen before bmList is stored on obj:
+            % bmList holds value objects in the general case, so writing to the
+            % local copy after assigning obj.bmList would discard the samples.
             for k = 1:obj.basisInfo.nBasis
                 if isempty(obj.samplesExtract)
-                    if isobject(bmList{k}) && ~isprop(bmList{k}, 'samples')
+                    if ~mvbInternal.hasSamples(bmList{k})
                         if k == 1
-                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList{1}'")
+                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList{1}'\n")
                         end
-                        bmList{k}.samples = bayesModelSamples();
-                        continue
-                    end
-
-                    if isstruct(bmList{k}) && ~isfield(bmList{k}, 'samples')
-                        if k == 1
-                            fprintf("Generating 'samples' attribute, since it was absent in 'bmList{1}'")
-                        end
-                        bmList{k}.samples = bayesModelSamples();
-                        continue
+                        bmList{k} = mvbInternal.setSamples(bmList{k}, bayesModelSamples());
+                    elseif isstruct(mvbInternal.getSamples(bmList{k}))
+                        % Normalize struct samples into the samples container so
+                        % that new fields can always be added.
+                        bmList{k} = mvbInternal.setSamples(bmList{k}, ...
+                            bayesModelSamples(mvbInternal.getSamples(bmList{k})));
                     end
                 else
-                    bmList{k}.samples = obj.samplesExtract(bmList{k});
+                    bmList{k} = mvbInternal.setSamples(bmList{k}, obj.samplesExtract(bmList{k}));
                 end
-
             end
+
+            obj.bmList = bmList;
 
             % Get Residual SD
             if isempty(obj.residSDExtract)
-                fprintf("Approximating 'residSD', since 'residSDExtract' is NaN\n")
-                out = obj.predict(obj.X, 'returnPostCoefs', true);
-                for k = 1:obj.basisInfo.nBasis
-                    resid = obj.basisInfo.coefs(:,k)' - out.postCoefs(:, :, k);
-                    obj.bmList{k}.samples.residSD = std(resid,0, 2);
+                if ~mvbInternal.hasSamplesField(mvbInternal.getSamples(obj.bmList{1}), 'residSD')
+                    fprintf("Approximating 'residSD', since 'residSDExtract' is empty\n")
+                    out = obj.predict(obj.X, 'returnPostCoefs', true);
+                    for k = 1:obj.basisInfo.nBasis
+                        resid = obj.basisInfo.coefs(:,k)' - out.postCoefs(:, :, k);
+                        % Normalize by N (not N-1) to match numpy's np.std default.
+                        obj.bmList{k}.samples.residSD = std(resid, 1, 2);
+                    end
                 end
             else
                 for k = 1:obj.basisInfo.nBasis
-                    obj.bmList{k}.samples.residSD = obj.residSDExtract(bmList{k});
+                    obj.bmList{k}.samples.residSD = obj.residSDExtract(obj.bmList{k});
                 end
             end
 
@@ -105,6 +108,7 @@ classdef mvBayes
                 options.returnPostCoefs = false
                 options.returnMeanOnly = false
                 options.addResidError = false
+                options.addTruncError = false
                 options.idxSamplesArg = []
             end
             idxSamples = options.idxSamples;
@@ -112,6 +116,7 @@ classdef mvBayes
             returnMeanOnly = options.returnMeanOnly;
             idxSamplesArg = options.idxSamplesArg;
             addResidError = options.addResidError;
+            addTruncError = options.addTruncError;
 
             if isempty(idxSamplesArg)
                 idxSamplesArg = obj.idxSamplesArg;
@@ -120,14 +125,14 @@ classdef mvBayes
             if (ischar(idxSamples) || isstring(idxSamples)) && strcmp(idxSamples, "default")
                 % nothing to do
 
-            elseif ~ismember(idxSamplesArg, methodInputNames(obj.bmList{1}, 'predict'))
+            elseif ~ismember(idxSamplesArg, mvbInternal.methodInputNames(obj.bmList{1}, 'predict'))
                 fprintf(['''%s'' is not an argument of the bayesModel predict ' ...
                     'function...setting idxSamples=''default''\n'], idxSamplesArg);
                 idxSamples = "default";
 
             else
                 if (ischar(idxSamples) || isstring(idxSamples)) && strcmp(idxSamples, "final")
-                    idxSamples = obj.nSamples;          % see note 3
+                    idxSamples = obj.nSamples;
                 elseif isnumeric(idxSamples) || islogical(idxSamples)
                     idxSamples = double(idxSamples(:)).';   % scalar or vector, both fine
                 elseif iscell(idxSamples)
@@ -136,17 +141,17 @@ classdef mvBayes
                     try
                         idxSamples = double(idxSamples);
                     catch
-                        error('MyClass:badIdxSamples', ...
+                        error('mvBayes:badIdxSamples', ...
                             ['''idxSamples'' must be ''default'', ''final'', ' ...
                             'numeric, or coercible to numeric.']);
                     end
                 end
             end
 
-            if strcmpi(idxSamples, 'default')
+            if (ischar(idxSamples) || isstring(idxSamples)) && strcmpi(idxSamples, 'default')
                 args = {};
             else
-                args = {idxSamplesArg, idxSamples};
+                args = mvbInternal.idxSamplesArgs(obj.bmList{1}, idxSamplesArg, idxSamples);
             end
             postCoefs1 = obj.bmList{1}.predict(Xtest, args{:});
             postCoefs = zeros(size(postCoefs1,1), size(postCoefs1,2), obj.basisInfo.nBasis);
@@ -154,6 +159,16 @@ classdef mvBayes
             clear postCoefs1
             for k = 2:obj.basisInfo.nBasis
                 postCoefs(:, :, k) = obj.bmList{k}.predict(Xtest, args{:});
+            end
+
+            % Residual error is added to the coefficients before the basis
+            % expansion, so that it propagates into the returned response.
+            if addResidError
+                for k = 1:obj.basisInfo.nBasis
+                    residSD = obj.bmList{k}.samples.residSD(:);
+                    residError = randn(size(postCoefs,1), size(postCoefs,2)) .* residSD;
+                    postCoefs(:, :, k) = postCoefs(:, :, k) + residError;
+                end
             end
 
             if strcmpi(obj.basisInfo.basisType, "pns")
@@ -174,15 +189,13 @@ classdef mvBayes
             Ypost = YstandardPost .* obj.basisInfo.Yscale + center;
             clear YstandardPost
 
-            if addResidError
-                for k = 1:obj.basisInfo.nBasis
-                    mu = zeros(length(obj.bmList{k}.samples.residSD), 1);
-                    n = size(postCoefs,2);
-                    residError = mvnrnd(mu, obj.bmList{k}.samples.residSD, n);
-                    postCoefs(:, :, k) = postCoefs(:, :, k) + residError;
-                end
+            if addTruncError
+                nDraw = size(Ypost,1) * size(Ypost,2);
+                idxResample = randi(size(obj.Y,1), nDraw, 1);
+                truncError = obj.basisInfo.truncError(idxResample, :);
+                Ypost = Ypost + reshape(truncError, size(Ypost));
+                clear truncError
             end
-
 
             if returnMeanOnly
                 Ypost = squeeze(mean(Ypost, 1));
@@ -312,7 +325,7 @@ classdef mvBayes
                 for i = 1:numel(allAttrs)
                     attr = allAttrs{i};
                     val = samp1.(attr);
-                    if isvector(val)
+                    if mvbInternal.isModelParam(val)
                         modelParams{end+1} = attr; %#ok<AGROW>
                     end
                 end
@@ -378,26 +391,16 @@ classdef mvBayes
             end
         end
 
-        % ------------------------------------------------------------------
-        function tf = isModelParam(val)
-            % Mirrors the Python isModelParam helper: returns true for scalars and
-            % vectors (excluding strings/chars, empties, and function handles).
-            if isempty(val) || isa(val, 'function_handle') || ischar(val) || isstring(val)
-                tf = false;
-                return
-            end
-            try
-                tf = isnumeric(val) && (isscalar(val) || isvector(val));
-            catch
-                tf = false;
-            end
-        end
-
-        function obj = mvSobol(obj, totalSobol, nMC)
+        function obj = mvSobol(obj, totalSobol, nMC, idxSamples)
+            %MVSOBOL Sobol' indices, by Monte Carlo or (for BASS) closed form.
+            %
+            %   The indices keep a leading posterior-sample dimension:
+            %   firstOrderSobol and totalOrderSobol are nSamplesUsed x p x nMV.
             arguments
                 obj
                 totalSobol = true
                 nMC = nan
+                idxSamples = "final"
             end
 
             p = size(obj.X,2);
@@ -406,27 +409,39 @@ classdef mvBayes
                 nMC = 2^12;
             end
 
-            if strcmpi(class(obj.bmList{1}), "BassModel") && isnan(nMC)
+            useBASS = strcmpi(class(obj.bmList{1}), "BassModel") && isnan(nMC);
+
+            if useBASS
                 mod = BassBasis(obj.X, obj.Y, obj.basisInfo.basis',nan,nan,nan,nan,nan,nan,false);
                 mod.bm_list = obj.bmList;
 
-                obj_sob = sobolBasis(mod);
-                obj_sob = obj_sob.decomp(1);
-
-                obj.firstOrderSobol = zeros(p, obj.basisInfo.nMV);
                 if totalSobol
-                    obj.totalOrderSobol = zeros(p, obj.basisInfo.nMV);
+                    maxOrder = min(p, obj.bmList{1}.prior.maxInt);
                 else
-                    obj.totalOrderSobol = nan;
+                    maxOrder = 1;
                 end
-                obj.varTotal = zeros(p, obj.basisInfo.nMV);
-                obj.firstOrderSobol = obj_sob.S_var(1:p,:);
-                if totalSobol
-                    obj.totalOrderSobol = obj_sob.T_var;
-                end
-                obj.varTotal = obj_sob.S_var(1,:) ./ obj_sob.S(1,:);
 
-                obj.varTotal = max([obj.varTotal; sum(obj.firstOrderSobol,1)]);
+                idxUse = mvbInternal.resolveIdxSamples(idxSamples, obj.nSamples);
+                nUse = numel(idxUse);
+
+                firstOrder = zeros(nUse, p, obj.basisInfo.nMV);
+                if totalSobol
+                    totalOrder = zeros(nUse, p, obj.basisInfo.nMV);
+                else
+                    totalOrder = [];
+                end
+                varTot = zeros(nUse, obj.basisInfo.nMV);
+
+                for i = 1:nUse
+                    obj_sob = sobolBasis(mod);
+                    obj_sob = obj_sob.decomp(maxOrder, nan, idxUse(i));
+
+                    firstOrder(i, :, :) = obj_sob.S_var(1:p, :);
+                    if totalSobol
+                        totalOrder(i, :, :) = obj_sob.T_var;
+                    end
+                    varTot(i, :) = obj_sob.S_var(1,:) ./ obj_sob.S(1,:);
+                end
             else
                 if isnan(nMC)
                     nMC = 2^12;
@@ -456,192 +471,192 @@ classdef mvBayes
                 saltelliSequence = saltelliSequence + xmin;
 
                 % evaluate model at those param values
-                saltelliMC = obj.predict(saltelliSequence, length(obj.bmList{1}.samples.s2));
-                saltelliMC = squeeze(saltelliMC);
+                saltelliMC = obj.predict(saltelliSequence, 'idxSamples', idxSamples);
+                nUse = size(saltelliMC, 1);
 
-                % transform the samples
-                meanS = mean(saltelliMC);
-                saltelliMC = saltelliMC - meanS;
+                % transform the samples (center each posterior sample over the
+                % Monte Carlo dimension)
+                saltelliMC = saltelliMC - mean(saltelliMC, 2);
 
                 % Estimate Sobol' Indices
-                modA = saltelliMC(1:nMC, :);
-                modB = saltelliMC((nMC+1):(2*nMC), :);
-                modAB = zeros(p, size(modA,1), size(modA,2));
-                for j = 1:p
-                    modAB(j,:,:) = saltelliMC(((2+(j-1))*nMC+1):((2+j)*nMC), :);
-                end
+                modA = saltelliMC(:, 1:nMC, :);
+                modB = saltelliMC(:, (nMC+1):(2*nMC), :);
 
-                obj.varTotal = var(saltelliMC, 0, 1);
-                clear saltelliMC
+                % Normalize by N (not N-1) to match numpy's np.var default.
+                varTot = reshape(var(saltelliMC, 1, 2), nUse, obj.basisInfo.nMV);
 
-                obj.firstOrderSobol = zeros(p, obj.basisInfo.nMV);
+                firstOrder = zeros(nUse, p, obj.basisInfo.nMV);
                 if totalSobol
-                    obj.totalOrderSobol = zeros(p, obj.basisInfo.nMV);
+                    totalOrder = zeros(nUse, p, obj.basisInfo.nMV);
                 else
-                    obj.totalOrderSobol = nan;
+                    totalOrder = [];
                 end
                 for j = 1:p
-                    obj.firstOrderSobol(j, :) = mean(modB .* (squeeze(modAB(j,:,:))-modA));
+                    modAB = saltelliMC(:, ((2+(j-1))*nMC+1):((2+j)*nMC), :);
+
+                    firstOrder(:, j, :) = mean(modB .* (modAB - modA), 2);
 
                     if totalSobol
-                        obj.totalOrderSobol(j, :) = 0.5 * mean((modA-squeeze(modAB(j,:,:))).^2);
+                        totalOrder(:, j, :) = 0.5 * mean((modA - modAB).^2, 2);
                     end
                 end
-
-                obj.varTotal = max([obj.varTotal; sum(obj.firstOrderSobol,1)]);
-
+                clear saltelliMC modA modB modAB
             end
+
+            obj.firstOrderSobol = firstOrder;
+            obj.totalOrderSobol = totalOrder;
+
+            sumFirst = sum(reshape(mean(firstOrder, 1), p, obj.basisInfo.nMV), 1);
+            obj.varTotal = max([varTot; sumFirst], [], 1);
 
         end
 
-        function plotSobol(obj, labels)
-
+        function plotSobol(obj, options)
+            %PLOTSOBOL Plot the Sobol' indices computed by mvSobol.
+            %
+            %   Left   - first-order indices normalized to sum to one at each
+            %            multivariate index
+            %   Center - first-order indices on the original variance scale
+            %   Right  - total-order indices (only if they were computed)
             arguments
                 obj
-                labels = nan
+                options.totalSobol = true
+                options.labels = []
+                options.idxMV = []
+                options.waterfall = false
+                options.xlabel = "Multivariate Index"
+                options.plotTitle = []
+                options.file = []
             end
 
-            if ~isnan(obj.totalOrderSobol)
-                totalSobol = true;
+            if isempty(obj.firstOrderSobol)
+                error('mvBayes:noSobol', ...
+                    "Sobol' indices have not been computed. Need to run mvSobol before plotSobol.");
             end
 
             p = size(obj.X,2);
-            idxMV = linspace(0, 1, obj.nMV);
 
-            if isscalar(labels) && isnan(labels)
-                labels = cell(1,p+1);
-                for i=1:p
+            idxMV = options.idxMV;
+            if isempty(idxMV)
+                idxMV = 1:obj.nMV;
+            end
+            idxMV = idxMV(:).';
+
+            labels = options.labels;
+            if isempty(labels)
+                labels = cell(1,p);
+                for i = 1:p
                     labels{i} = sprintf('X%d', i);
                 end
+            elseif ~iscell(labels)
+                labels = cellstr(labels);
             end
-            labels{p+1} = "Higher Order";
+            labels = [labels(:).', {'Higher-Order'}];
 
-            lty = repmat(["-", "--", ":", "-."], 1, mod(4, p));
-            lty = lty(1:p);
-            lty = [lty, "-"];
+            % Line styles cycle through four options, one per predictor.
+            lty = repmat(["-", "--", ":", "-."], 1, ceil(p/4));
+            lty = [lty(1:p), "-"];
 
             rgb = zeros(p+1,3);
             rgb(1:p, :) = brewermap(p, 'Paired');
             rgb(p+1,:) = [153, 153, 153] / 255;
 
-            firstOrderRel = obj.firstOrderSobol ./ obj.varTotal;
+            % Posterior means of the indices
+            firstOrder = reshape(mean(obj.firstOrderSobol, 1), p, obj.nMV);
+            firstOrderRel = firstOrder ./ obj.varTotal;
+
+            hasTotal = options.totalSobol && ~isempty(obj.totalOrderSobol);
+            if options.totalSobol && isempty(obj.totalOrderSobol)
+                fprintf("Total-order Sobol' indices have not been computed and will not be plotted.\n");
+            end
+            nPanel = 2 + hasTotal;
 
             figure()
-            if totalSobol
-                subplot(1,3,1)
-                hold on
-                [~, ord] = sort(idxMV);
-                meanX = [firstOrderRel; 1.0-sum(firstOrderRel)];
+            [~, ord] = sort(idxMV);
 
-                sens = cumsum(meanX);
-
-                for j=1:(p+1)
-                    x2 = [idxMV(ord) flip(idxMV(ord))];
-                    if j==1
-                        inBetween = [zeros(1,length(idxMV(ord))), flip(sens(j, ord))];
-                    else
-                        inBetween = [sens(j-1, ord), flip(sens(j,ord))];
-                    end
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
-                end
-                xlabel("Time")
-                ylabel("Relative First-Order Sobol' Index")
-                title("First-Order Relative Sensitivity")
-                ylim([0,1])
-                xlim([min(idxMV), max(idxMV)])
-
-                subplot(1,3,2)
-                hold on
-                sens_var = [cumsum(obj.firstOrderSobol); obj.varTotal];
-
+            % ---- Panel 1: relative first-order indices ----
+            subplot(1,nPanel,1)
+            hold on
+            if options.waterfall
+                meanX = [firstOrderRel; 1.0 - sum(firstOrderRel,1)];
+                sens = cumsum(meanX, 1);
                 for j = 1:(p+1)
                     x2 = [idxMV(ord), flip(idxMV(ord))];
                     if j == 1
-                        inBetween = [zeros(1, length(idxMV(ord))), flip(sens_var(j,ord))];
+                        inBetween = [zeros(1,numel(idxMV)), flip(sens(j, ord))];
+                    else
+                        inBetween = [sens(j-1, ord), flip(sens(j, ord))];
+                    end
+                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
+                end
+            else
+                for j = 1:p
+                    plot(idxMV, firstOrderRel(j,:), 'LineStyle', lty(j), ...
+                        'Color', rgb(j,:), 'LineWidth', 3, 'DisplayName', labels{j});
+                end
+                plot(idxMV, 1.0 - sum(firstOrderRel,1), 'LineStyle', lty(p+1), ...
+                    'Color', rgb(p+1,:), 'LineWidth', 3, 'DisplayName', labels{p+1});
+            end
+            xlabel(options.xlabel)
+            ylabel("Relative First-Order Sobol' Index")
+            title("First-Order Relative Sensitivity")
+            ylim([0,1])
+            xlim([min(idxMV), max(idxMV)])
+
+            % ---- Panel 2: first-order indices on the variance scale ----
+            subplot(1,nPanel,2)
+            hold on
+            if options.waterfall
+                sens_var = [cumsum(firstOrder,1); obj.varTotal];
+                for j = 1:(p+1)
+                    x2 = [idxMV(ord), flip(idxMV(ord))];
+                    if j == 1
+                        inBetween = [zeros(1, numel(idxMV)), flip(sens_var(j,ord))];
                     else
                         inBetween = [sens_var(j-1, ord), flip(sens_var(j,ord))];
                     end
-
                     fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
                 end
-                ylim([0, max(inBetween)+3])
-                xlabel("Time")
-                ylabel("First-Order Sobol' Index")
-                title("First-Order Sensitivity")
-                xlim([min(idxMV), max(idxMV)])
-                legend;
-
-                subplot(1,3,3)
-                hold on
-                for j=1:p
-                    plot(idxMV, obj.totalOrderSobol(j,:), 'LineStyle', lty(j), 'Color', rgb(j,:), 'LineWidth', 3, 'DisplayName', labels{j});
+                ylim([0, max(sens_var(:))*1.05])
+            else
+                for j = 1:p
+                    plot(idxMV, firstOrder(j,:), 'LineStyle', lty(j), ...
+                        'Color', rgb(j,:), 'LineWidth', 3, 'DisplayName', labels{j});
                 end
-                xlabel("Time")
+                plot(idxMV, obj.varTotal - sum(firstOrder,1), 'LineStyle', lty(p+1), ...
+                    'Color', rgb(p+1,:), 'LineWidth', 3, 'DisplayName', labels{p+1});
+                ylim([0, max(firstOrder(:))*1.05])
+            end
+            xlabel(options.xlabel)
+            ylabel("First-Order Sobol' Index")
+            title("First-Order Sensitivity")
+            xlim([min(idxMV), max(idxMV)])
+            legend('Location', 'northwest');
+
+            % ---- Panel 3: total-order indices ----
+            if hasTotal
+                totalOrder = reshape(mean(obj.totalOrderSobol, 1), p, obj.nMV);
+                subplot(1,nPanel,3)
+                hold on
+                for j = 1:p
+                    plot(idxMV, totalOrder(j,:), 'LineStyle', lty(j), ...
+                        'Color', rgb(j,:), 'LineWidth', 3, 'DisplayName', labels{j});
+                end
+                xlabel(options.xlabel)
                 ylabel("Total-Order Sobol' Index")
                 title("Total Sensitivity")
-                ylim([0, max(obj.totalOrderSobol(:))*1.05])
+                ylim([0, max(totalOrder(:))*1.05])
                 xlim([min(idxMV), max(idxMV)])
+            end
 
-            else
-                subplot(1,2,1)
-                hold on
-                [~, ord] = sort(idxMV);
-                meanX = [firstOrderRel; 1.0-sum(firstOrderRel)];
+            if ~isempty(options.plotTitle)
+                sgtitle(options.plotTitle);
+            end
 
-                sens = cumsum(meanX);
-
-                for j=1:(p+1)
-                    x2 = [idxMV(ord) flip(idxMV(ord))];
-                    if j==1
-                        inBetween = [zeros(1,length(idxMV(ord))), flip(sens(j, ord))];
-                    else
-                        inBetween = [sens(j-1, ord), flip(sens(j,ord))];
-                    end
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
-                end
-                xlabel("Time")
-                ylabel("Relative First-Order Sobol' Index")
-                title("First-Order Relative Sensitivity")
-                ylim([0,1])
-                xlim([min(idxMV), max(idxMV)])
-
-                subplot(1,2,2)
-                hold on
-                sens_var = [cumsum(obj.firstOrderSobol); obj.varTotal];
-
-                for j = 1:(p+1)
-                    x2 = [idxMV(ord), flip(idxMV(ord))];
-                    if j == 1
-                        inBetween = [zeros(1, length(idxMV(ord))), flip(sens_var(j,ord))];
-                    else
-                        inBetween = [sens_var(j-1, ord), flip(sens_var(j,ord))];
-                    end
-
-                    fill(x2, inBetween, rgb(j,:), 'DisplayName', labels{j})
-                end
-                ylim([0, max(inBetween)+3])
-                xlabel("Time")
-                ylabel("First-Order Sobol' Index")
-                title("First-Order Sensitivity")
-                xlim([min(idxMV), max(idxMV)])
-                legend;
+            if ~isempty(options.file)
+                exportgraphics(gcf, options.file);
             end
 
         end
     end
-end
-
-function names = methodInputNames(objIn, methodName)
-mc = metaclass(objIn);
-m  = mc.MethodList(strcmp({mc.MethodList.Name}, methodName));
-if isempty(m)
-    names = {};
-else
-    inputs = m.Signature.Inputs;
-    names = cell(1,length(inputs));
-    for i = 1:length(inputs)
-        tmp = inputs(i).Identifier.Name;
-        names{i} = tmp;
-    end
-end
 end

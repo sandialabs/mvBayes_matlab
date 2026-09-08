@@ -1,7 +1,7 @@
 %% generate functions
 clc; clear
 addpath(genpath('../fdasrvf_MATLAB'))
-bppr = false; % if false we default to bass
+bppr = true; % if false we default to bass
 if bppr
     addpath('../bayesppr_matlab/')
 else
@@ -93,4 +93,4 @@ end
 
 %% CV
 
-out = mvCV(@bass, x_train, ftilde_train', 'nRep', 5, 'nBasis', 4, 'idxSamplesArg', 'mcmc_use');
+out = mvCV(@bppr, x_train, ftilde_train', 'nRep', 5, 'nBasis', 4, 'idxSamplesArg', 'mcmc_use', 'residSDExtract', @(x) sqrt(x.samples.s2));
