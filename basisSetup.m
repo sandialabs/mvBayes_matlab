@@ -22,15 +22,33 @@ classdef basisSetup
     end
 
     methods
-        function obj = basisSetup(Y, basisType, nBasis, propVarExplained, center, scale, thresh)
+        function obj = basisSetup(Y, basisType, customBasis, nBasis, propVarExplained, center, scale, thresh, basisTransform)
+            %BASISSETUP Compute basis components for the response matrix Y.
+            %
+            %   Y                : n x nMV response matrix.
+            %   basisType        : "pca", "pns", "bspline", "legendre" or "custom".
+            %   customBasis      : k x nMV basis matrix, required when
+            %                      basisType is "custom"; ignored otherwise.
+            %   nBasis           : number of components. Required for "bspline"
+            %                      and "legendre"; NaN selects it from
+            %                      propVarExplained where that is possible.
+            %   propVarExplained : proportion of variance to explain when
+            %                      choosing nBasis (default 0.99).
+            %   center, scale    : whether to center/scale Y beforehand.
+            %   thresh           : eigenvalue threshold, PNS only.
+            %   basisTransform   : optional metric in which a custom basis is
+            %                      orthonormalized (used by supervised basis
+            %                      updates).
             arguments
                 Y {mustBeNumeric}
                 basisType = "pca"
+                customBasis = []
                 nBasis = nan
                 propVarExplained = 0.99
                 center = true
                 scale = false
                 thresh = 1e-15
+                basisTransform = []
             end
 
             obj.Y = Y;
@@ -78,6 +96,40 @@ classdef basisSetup
 
                 obj.varExplained = (sv.^2) / (n - 1);
                 coefs = U .* sv.';                    % == Ycentered * basis'
+            elseif any(strcmpi(basisType, ["bspline", "legendre", "custom"]))
+                if any(strcmpi(basisType, ["bspline", "legendre"]))
+                    if isnan(nBasis)
+                        error('basisSetup:nBasisRequired', ...
+                            "nBasis must be specified for basisType='%s'", basisType);
+                    end
+                    if strcmpi(basisType, "bspline")
+                        if nBasis < 3
+                            error('basisSetup:nBasisTooSmall', ...
+                                "Must have nBasis >= 3 for basisType='bspline'");
+                        end
+                        customBasis = basisBspline(linspace(0,1,obj.nMV), nBasis);
+                    else
+                        if mod(nBasis, 2) == 1
+                            fprintf("nBasis must be even for basisType='legendre'. Setting nBasis+=1\n");
+                            nBasis = nBasis + 1;
+                        end
+                        customBasis = basisLegendre(linspace(0,1,obj.nMV), nBasis/2, 1);
+                    end
+                else
+                    if isempty(customBasis)
+                        error('basisSetup:customBasisRequired', ...
+                            "Must provide customBasis if basisType=='custom'");
+                    end
+                    if size(customBasis,2) ~= obj.nMV
+                        error('basisSetup:customBasisSize', ...
+                            'size(customBasis,2) ~= size(Y,2)');
+                    end
+                end
+
+                obj.basisConstruct = customBasisConstruct(customBasis, Ystandard, basisTransform);
+                basis = obj.basisConstruct.basis;
+                coefs = obj.basisConstruct.coefs;
+                obj.varExplained = obj.basisConstruct.varExplained;
             elseif strcmpi(basisType, "pns")
                 [n, d] = size(Y);
                 obj.tt = linspace(0, 1, d);
@@ -170,8 +222,13 @@ classdef basisSetup
                     pnsdat = psi./repmat(sqrt(sum(psi.^2)),d,1);
                     coefs = PNSs2e(pnsdat, obj.basisConstruct);
                     coefs = coefs(:, 1:obj.nBasis);
-                else
+                elseif strcmpi(obj.basisType, "pca")
                     coefs = (YtestStandard - obj.basisMean) * obj.basis';
+                else
+                    % bspline, legendre, custom: project through the basis
+                    % construction, which may carry a basisTransform.
+                    coefs = obj.basisConstruct.transform(YtestStandard);
+                    coefs = coefs(:, 1:obj.nBasis);
                 end
             end
         end

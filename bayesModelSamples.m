@@ -36,6 +36,7 @@ classdef bayesModelSamples < dynamicprops
             elseif isobject(s)
                 names = properties(s);
                 for i = 1:numel(names)
+                    obj.addprop(names{i});
                     obj.(names{i}) = s.(names{i});
                 end
             else
@@ -47,6 +48,11 @@ classdef bayesModelSamples < dynamicprops
         function obj = subsasgn(obj, S, val)
             % Create the property on first assignment, mirroring Python's
             % ability to set arbitrary attributes on an instance.
+            %
+            % This overload is only reached from outside the class. Dot
+            % assignment inside bayesModelSamples' own methods uses built-in
+            % behavior and bypasses it, so the constructor above must call
+            % addprop explicitly.
             if ~isempty(S) && strcmp(S(1).type, '.') ...
                     && (ischar(S(1).subs) || isstring(S(1).subs)) ...
                     && ~isprop(obj, S(1).subs)

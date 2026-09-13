@@ -182,7 +182,7 @@ for r = 1:nRep
     for idx = 1:nTest
         predsIdx     = reshape(preds(:, idx, :), [nSamples, q]);
         distSamples  = sqrt(mean((predsIdx - Yhat(idx, :)).^2, 2));
-        distBound(idx) = quantileLinear(distSamples, coverageTarget);
+        distBound(idx) = mvbInternal.quantileLinear(distSamples, coverageTarget);
     end
     distTest = sqrt(mean((Ytest - Yhat).^2, 2));
 
@@ -228,21 +228,4 @@ Sigma = (Sigma + Sigma') / 2;
 d = max(real(diag(D)), 0);
 A = real(V) * diag(sqrt(d));
 Z = randn(N, size(Sigma, 1)) * A';
-end
-
-% =========================================================================
-function qv = quantileLinear(x, p)
-%QUANTILELINEAR Linear-interpolation quantile matching numpy.quantile defaults.
-%   MATLAB's built-in quantile uses a different plotting position, so this
-%   helper is used to keep results consistent with the original Python code.
-x = sort(x(:));
-n = numel(x);
-if n == 1
-    qv = x;
-    return
-end
-h  = (n - 1) * p + 1;
-lo = floor(h);
-hi = ceil(h);
-qv = x(lo) + (h - lo) * (x(hi) - x(lo));
 end

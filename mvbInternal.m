@@ -131,6 +131,138 @@ classdef mvbInternal
             tf = (isnumeric(val) || islogical(val)) && (isscalar(val) || isvector(val));
         end
 
+        function B = bsplineDesign(x, knots, degree)
+            %BSPLINEDESIGN Cox-de Boor recursion for a B-spline design matrix.
+            %
+            %   Equivalent to spcol(knots, degree+1, x) from the Curve Fitting
+            %   Toolbox, used by basisBspline when that toolbox is unavailable
+            %   and kept alongside it so the two can be compared in tests.
+            %
+            %   Returns numel(x) x (numel(knots)-degree-1), one basis function
+            %   per column.
+            x = double(x(:));
+            knots = sort(double(knots(:))).';
+            nKnot = numel(knots);
+            nBases = nKnot - degree - 1;
+
+            % Degree 0: indicator of each half-open knot span.
+            N = zeros(numel(x), nKnot - 1);
+            for i = 1:(nKnot - 1)
+                N(:, i) = (knots(i) <= x) & (x < knots(i+1));
+            end
+
+            % The half-open convention leaves the right endpoint with no
+            % support, so assign it to the last non-degenerate span (as spcol
+            % and scipy's splev do).
+            atMax = (x == knots(end));
+            if any(atMax)
+                last = find(knots(1:end-1) < knots(2:end), 1, 'last');
+                N(atMax, :) = 0;
+                N(atMax, last) = 1;
+            end
+
+            % Raise the degree one level at a time. Terms with a zero
+            % denominator come from repeated knots and contribute nothing.
+            for d = 1:degree
+                Nnew = zeros(numel(x), nKnot - 1 - d);
+                for i = 1:(nKnot - 1 - d)
+                    den1 = knots(i+d) - knots(i);
+                    den2 = knots(i+d+1) - knots(i+1);
+                    term = zeros(numel(x), 1);
+                    if den1 > 0
+                        term = term + ((x - knots(i)) / den1) .* N(:, i);
+                    end
+                    if den2 > 0
+                        term = term + ((knots(i+d+1) - x) / den2) .* N(:, i+1);
+                    end
+                    Nnew(:, i) = term;
+                end
+                N = Nnew;
+            end
+
+            B = N(:, 1:nBases);
+        end
+
+        function knots = bsplineKnots(fDomain, nBasis, degree)
+            %BSPLINEKNOTS Clamped knot vector used by basisBspline, exposed so
+            %   that tests can build a collocation matrix independently.
+            order = degree + 1;
+            nInner = nBasis - order + 1;
+            if nInner > 0
+                q = linspace(0, 1, nInner + 2);
+                innerKnots = mvbInternal.quantileLinear(fDomain, q(2:end-1));
+            else
+                innerKnots = [];
+            end
+            knots = sort([innerKnots(:).', ...
+                repmat(min(fDomain), 1, order), repmat(max(fDomain), 1, order)]);
+        end
+
+        function tf = curveFittingAvailable()
+            %CURVEFITTINGAVAILABLE True if the Curve Fitting Toolbox's B-spline
+            %   collocation routine SPCOL is on the path.
+            tf = exist('spcol', 'file') > 0;
+        end
+
+        function tf = parallelAvailable()
+            %PARALLELAVAILABLE True if the Parallel Computing Toolbox is usable.
+            %   (Without it MATLAB still runs parfor serially, so this only
+            %   controls the reported nCores.)
+            try
+                tf = ~isempty(ver('parallel')) ...
+                    && license('test', 'Distrib_Computing_Toolbox');
+            catch
+                tf = false;
+            end
+        end
+
+        function n = numCoresAvailable()
+            %NUMCORESAVAILABLE Physical cores on this machine.
+            try
+                n = feature('numcores');          % undocumented but exact
+            catch
+                n = maxNumCompThreads;            % documented fallback
+            end
+        end
+
+        function ensurePool(nCores)
+            %ENSUREPOOL Start a parallel pool with nCores workers if none is
+            %   open. An existing pool is reused as-is rather than restarted,
+            %   so a user's own pool configuration is never torn down.
+            try
+                pool = gcp('nocreate');
+                if isempty(pool)
+                    parpool(nCores);
+                elseif pool.NumWorkers < nCores
+                    fprintf(['Using the existing parallel pool with %d workers ' ...
+                        '(%d requested).\n'], pool.NumWorkers, nCores);
+                end
+            catch ME
+                fprintf(['Could not start a parallel pool (%s). Continuing ' ...
+                    'without one.\n'], ME.message);
+            end
+        end
+
+        function q = quantileLinear(x, probs)
+            %QUANTILELINEAR Quantiles by linear interpolation, matching the
+            %   default of numpy.percentile (MATLAB's built-in quantile uses a
+            %   different plotting position).
+            x = sort(double(x(:)));
+            n = numel(x);
+            probs = double(probs);
+            q = zeros(size(probs));
+            for i = 1:numel(probs)
+                if n == 1
+                    q(i) = x;
+                    continue
+                end
+                h  = (n - 1) * probs(i) + 1;
+                lo = floor(h);
+                hi = ceil(h);
+                q(i) = x(lo) + (h - lo) * (x(hi) - x(lo));
+            end
+        end
+
         function idxUse = resolveIdxSamples(idxSamples, nSamples)
             %RESOLVEIDXSAMPLES Turn "final"/"default"/numeric into MCMC indices.
             if (ischar(idxSamples) || isstring(idxSamples)) && strcmpi(idxSamples, "final")

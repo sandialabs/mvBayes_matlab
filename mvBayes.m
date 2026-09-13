@@ -23,8 +23,10 @@ classdef mvBayes
                 X
                 Y
                 options.basisType = "pca"
+                options.customBasis = []
                 options.nBasis = nan
                 options.propVarExplained = 0.99
+                options.nCores = 1
                 options.center = true
                 options.scale = false
                 options.residSDExtract = []
@@ -41,19 +43,64 @@ classdef mvBayes
             obj.idxSamplesArg = options.idxSamplesArg;
             obj.samplesExtract = options.samplesExtract;
 
-            obj.basisInfo = basisSetup(Y, options.basisType, options.nBasis, ...
-                options.propVarExplained, options.center, options.scale, options.thresh);
+            obj.basisInfo = basisSetup(Y, options.basisType, options.customBasis, ...
+                options.nBasis, options.propVarExplained, options.center, ...
+                options.scale, options.thresh);
 
-            obj = obj.fit();
+            obj = obj.fit(options.nCores);
 
         end
 
-        function obj = fit(obj)
-            fprintf('Starting mvBayes with %d components\n', obj.basisInfo.nBasis)
+        function nCores = nCoresAdjust(obj, nCores)
+            %NCORESADJUST Clamp nCores to the number of components, the
+            %   availability of the Parallel Computing Toolbox, and the number of
+            %   cores on this machine.
+            nCores = min(nCores, obj.basisInfo.nBasis);
+            if nCores > 1 && ~mvbInternal.parallelAvailable()
+                fprintf(['Parallel Computing Toolbox not available. ' ...
+                    'Setting nCores=1.\n']);
+                nCores = 1;
+            else
+                nCoresAvailable = mvbInternal.numCoresAvailable();
+                if nCores > nCoresAvailable
+                    fprintf(['Only %d cores are available. Using all available ' ...
+                        'cores.\n'], nCoresAvailable);
+                    nCores = nCoresAvailable;
+                end
+            end
+        end
 
-            bmList = cell(obj.basisInfo.nBasis,1);
-            for k = 1:obj.basisInfo.nBasis
-                bmList{k} = obj.bayesModel(obj.X, obj.basisInfo.coefs(:,k));
+        function obj = fit(obj, nCores)
+            %FIT Fit bayesModel for each basis component.
+            %
+            %   nCores : number of workers to use when fitting the independent
+            %            models (default 1). Requires the Parallel Computing
+            %            Toolbox; without it, fitting falls back to serial.
+            arguments
+                obj
+                nCores (1,1) {mustBeNumeric, mustBePositive} = 1
+            end
+
+            nCores = obj.nCoresAdjust(nCores);
+
+            fprintf('Starting mvBayes with %d components, using %d cores.\n', ...
+                obj.basisInfo.nBasis, nCores)
+
+            nBasis = obj.basisInfo.nBasis;
+            bayesModel = obj.bayesModel;
+            Xfit = obj.X;
+            coefs = obj.basisInfo.coefs;
+
+            bmList = cell(nBasis,1);
+            if nCores == 1
+                for k = 1:nBasis
+                    bmList{k} = fitBayesModel(bayesModel, Xfit, coefs(:,k), k);
+                end
+            else
+                mvbInternal.ensurePool(nCores);
+                parfor k = 1:nBasis
+                    bmList{k} = fitBayesModel(bayesModel, Xfit, coefs(:,k), k);
+                end
             end
 
             % Get Samples. This must happen before bmList is stored on obj:
@@ -83,7 +130,7 @@ classdef mvBayes
             if isempty(obj.residSDExtract)
                 if ~mvbInternal.hasSamplesField(mvbInternal.getSamples(obj.bmList{1}), 'residSD')
                     fprintf("Approximating 'residSD', since 'residSDExtract' is empty\n")
-                    out = obj.predict(obj.X, 'returnPostCoefs', true);
+                    out = obj.predict(obj.X, 'returnPostCoefs', true, 'nCores', nCores);
                     for k = 1:obj.basisInfo.nBasis
                         resid = obj.basisInfo.coefs(:,k)' - out.postCoefs(:, :, k);
                         % Normalize by N (not N-1) to match numpy's np.std default.
@@ -109,6 +156,7 @@ classdef mvBayes
                 options.returnMeanOnly = false
                 options.addResidError = false
                 options.addTruncError = false
+                options.nCores = 1
                 options.idxSamplesArg = []
             end
             idxSamples = options.idxSamples;
@@ -153,13 +201,25 @@ classdef mvBayes
             else
                 args = mvbInternal.idxSamplesArgs(obj.bmList{1}, idxSamplesArg, idxSamples);
             end
-            postCoefs1 = obj.bmList{1}.predict(Xtest, args{:});
-            postCoefs = zeros(size(postCoefs1,1), size(postCoefs1,2), obj.basisInfo.nBasis);
-            postCoefs(:, :, 1) = postCoefs1;
-            clear postCoefs1
-            for k = 2:obj.basisInfo.nBasis
-                postCoefs(:, :, k) = obj.bmList{k}.predict(Xtest, args{:});
+            % In almost all cases use nCores=1 here, to avoid competing with
+            % parallelism inside bayesModel's own predict method.
+            nCores = obj.nCoresAdjust(options.nCores);
+
+            nBasis = obj.basisInfo.nBasis;
+            bmList = obj.bmList;
+            coefsCell = cell(nBasis,1);
+            if nCores == 1
+                for k = 1:nBasis
+                    coefsCell{k} = bmList{k}.predict(Xtest, args{:});
+                end
+            else
+                mvbInternal.ensurePool(nCores);
+                parfor k = 1:nBasis
+                    coefsCell{k} = bmList{k}.predict(Xtest, args{:});
+                end
             end
+            postCoefs = cat(3, coefsCell{:});
+            clear coefsCell
 
             % Residual error is added to the coefficients before the basis
             % expansion, so that it propagates into the returned response.
@@ -659,4 +719,15 @@ classdef mvBayes
 
         end
     end
+end
+
+% =========================================================================
+function bm = fitBayesModel(bayesModel, X, y, k)
+%FITBAYESMODEL Fit one component, naming the component if it fails.
+try
+    bm = bayesModel(X, y);
+catch ME
+    error('mvBayes:bayesModelFailed', ...
+        'Error fitting model %d: %s', k, ME.message);
+end
 end
