@@ -1,0 +1,30 @@
+name = "mvBayes"
+
+[project.labels."Toolbox - Toolbox1"]
+"App Gallery File" = [
+]
+"Toolbox Image File" = [
+]
+"Getting Started Guide" = [
+]
+
+[[package]]
+configuration-name = "mvBayes"
+supported-platforms = [
+    "windows",
+    "linux",
+    "macos",
+]
+use-license-bsd = false
+output-folder = "release"
+output-file-name = "mvBayes.mltbx"
+provider.organization = ""
+provider.name = "J. Derek Tucker"
+provider.email = "jdtuck@sandia.gov"
+name = "mvBayes"
+description = "An matlab implementation of the multivariate Bayesian regression (mvBayes) framework. Decomposes a multivariate/functional response using a user-specified orthogonal basis decomposition, and then models each basis component independently using an arbitrary user-specified (univariate) Bayesian regression model. Includes prediction and plotting methods.\n"
+display-name = "mvBayes"
+summary = "An matlab implementation of the multivariate Bayesian regression (mvBayes) framework. "
+package-root = "/"
+version = "1.0.2"
+id = "68003cf3-ab2b-480b-a911-796508b7709e"
