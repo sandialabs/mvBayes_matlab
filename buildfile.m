@@ -5,7 +5,7 @@ plan = buildplan(localfunctions);
 
 plan("clean") = CleanTask;
 plan("check") = CodeIssuesTask;
-plan("test") = TestTask;
+plan("test") = TestTask("tests");
 
 % Make the "archive" task the default task in the plan
 plan.DefaultTasks = "package";
